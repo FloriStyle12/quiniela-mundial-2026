@@ -5,83 +5,92 @@ import toml
 import os
 import gspread
 
-# 1. CONFIGURACIÓN DE LA PÁGINA
+# 1. CONFIGURACIÓN
 st.set_page_config(page_title="La Quiniela Pro 2026", page_icon="⚽", layout="centered")
 
+# Estilos para asegurar que se vea bien en celular
 st.markdown("""
     <style>
-    .big-title { font-size:32px !important; font-weight: bold; color: #1E3A8A; text-align: center; margin-bottom: 0px; }
-    .subtitle { font-size:16px !important; text-align: center; color: #4B5563; margin-bottom: 20px; }
+    .big-title { font-size:28px !important; font-weight: bold; color: #1E3A8A; text-align: center; }
+    .stCheckbox { font-size: 16px !important; }
     </style>
 """, unsafe_allow_html=True)
 
 # 2. CONEXIÓN
 @st.cache_resource
-def conectar_google_sheets():
-    ruta_secretos = os.path.join(".streamlit", "secrets.toml")
-    secretos_dict = toml.load(ruta_secretos)
-    gsheets_conf = secretos_dict["connections"]["gsheets"]
-    credenciales = {
-        "type": gsheets_conf["type"], "project_id": gsheets_conf["project_id"],
-        "private_key_id": gsheets_conf["private_key_id"],
-        "private_key": gsheets_conf["private_key"].replace("\\n", "\n"),
-        "client_email": gsheets_conf["client_email"], "client_id": gsheets_conf["client_id"],
-        "auth_uri": gsheets_conf["auth_uri"], "token_uri": gsheets_conf["token_uri"],
-        "auth_provider_x509_cert_url": gsheets_conf["auth_provider_x509_cert_url"],
-        "client_x509_cert_url": gsheets_conf["client_x509_cert_url"]
+def conectar():
+    ruta = os.path.join(".streamlit", "secrets.toml")
+    conf = toml.load(ruta)["connections"]["gsheets"]
+    creds = {
+        "type": conf["type"], "project_id": conf["project_id"],
+        "private_key_id": conf["private_key_id"],
+        "private_key": conf["private_key"].replace("\\n", "\n"),
+        "client_email": conf["client_email"], "client_id": conf["client_id"],
+        "auth_uri": conf["auth_uri"], "token_uri": conf["token_uri"],
+        "auth_provider_x509_cert_url": conf["auth_provider_x509_cert_url"],
+        "client_x509_cert_url": conf["client_x509_cert_url"]
     }
-    gc = gspread.service_account_from_dict(credenciales)
-    return gc.open_by_url(gsheets_conf["spreadsheet"])
+    return gspread.service_account_from_dict(creds).open_by_url(conf["spreadsheet"])
 
-# --- LÓGICA DE FASES ---
-sh = conectar_google_sheets()
+# 3. EQUIPOS
+mundial_grupos = {
+    "Grupo A": ["🇲🇽 México", "🇿🇦 Sudáfrica", "🇰🇷 Corea del Sur", "🇨🇿 República Checa"],
+    "Grupo B": ["🇨🇦 Canadá", "🇧🇦 Bosnia y Herzegovina", "🇶🇦 Catar", "🇨🇭 Suiza"],
+    "Grupo C": ["🇧🇷 Brasil", "🇲🇦 Marruecos", "🇭🇹 Haití", "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Escocia"],
+    "Grupo D": ["🇺🇸 Estados Unidos", "🇵🇾 Paraguay", "🇦🇺 Australia", "🇹🇷 Turquía"],
+    "Grupo E": ["🇩🇪 Alemania", "🇨🇼 Curazao", "🇨🇮 Costa de Marfil", "🇪🇨 Ecuador"],
+    "Grupo F": ["🇳🇱 Países Bajos", "🇯🇵 Japón", "🇸🇪 Suecia", "🇹🇳 Túnez"],
+    "Grupo G": ["🇧🇪 Bélgica", "🇪🇬 Egipto", "🇮🇷 Irán", "🇳🇿 Nueva Zelanda"],
+    "Grupo H": ["🇪🇸 España", "🇨🇻 Cabo Verde", "🇸🇦 Arabia Saudita", "🇺🇾 Uruguay"],
+    "Grupo I": ["🇫🇷 Francia", "🇸🇳 Senegal", "🇮🇶 Irak", "🇳🇴 Noruega"],
+    "Grupo J": ["🇦🇷 Argentina", "🇩🇿 Argelia", "🇦🇹 Austria", "🇯🇴 Jordania"],
+    "Grupo K": ["🇵🇹 Portugal", "🇨🇩 RD Congo", "🇺🇿 Uzbekistán", "🇨🇴 Colombia"],
+    "Grupo L": ["🏴󠁧󠁢󠁥󠁮󠁧󠁿 Inglaterra", "🇭🇷 Croacia", "🇬🇭 Ghana", "🇵🇦 Panamá"]
+}
+todos = [eq for grupo in mundial_grupos.values() for eq in grupo]
+
+# 4. LÓGICA DE FASE
+sh = conectar()
 try:
-    fase_actual = int(sh.worksheet("Fase_Actual").acell('A1').value or 1)
+    fase_valor = sh.worksheet("Fase_Actual").acell('A1').value
+    fase_actual = int(fase_valor) if fase_valor and fase_valor.isdigit() else 1
 except: fase_actual = 1
 
-st.markdown(f'<p class="big-title">🏆 QUINIELA MUNDIALISTA 2026</p>', unsafe_allow_html=True)
-st.markdown(f'<p class="subtitle">Fase Actual: {"Grupos" if fase_actual==1 else str(fase_actual)+"vos de Final"}</p>', unsafe_allow_html=True)
+st.markdown('<p class="big-title">🏆 QUINIELA MUNDIALISTA 2026</p>', unsafe_allow_html=True)
 
-pestana_registro, pestana_leaderboard = st.tabs(["📝 Registrar Quiniela", "📊 Tabla de Posiciones"])
+pestana_reg, pestana_leader = st.tabs(["📝 Registrar", "📊 Posiciones"])
 
-# ==========================================
-# SECCIÓN: REGISTRO (FASES)
-# ==========================================
-with pestana_registro:
+with pestana_reg:
     if fase_actual == 1:
-        # AQUÍ VA TU CÓDIGO ORIGINAL DE GRUPOS
-        nombre_usuario = st.text_input("👤 Tu nombre", key="user_name")
-        mundial_grupos = {
-            "Grupo A": ["🇲🇽 México", "🇿🇦 Sudáfrica", "🇰🇷 Corea del Sur", "🇨🇿 República Checa"],
-            "Grupo B": ["🇨🇦 Canadá", "🇧🇦 Bosnia y Herzegovina", "🇶🇦 Catar", "🇨🇭 Suiza"],
-            "Grupo C": ["🇧🇷 Brasil", "🇲🇦 Marruecos", "🇭🇹 Haití", "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Escocia"],
-            "Grupo D": ["🇺🇸 Estados Unidos", "🇵🇾 Paraguay", "🇦🇺 Australia", "🇹🇷 Turquía"],
-            "Grupo E": ["🇩🇪 Alemania", "🇨🇼 Curazao", "🇨🇮 Costa de Marfil", "🇪🇨 Ecuador"],
-            "Grupo F": ["🇳🇱 Países Bajos", "🇯🇵 Japón", "🇸🇪 Suecia", "🇹🇳 Túnez"],
-            "Grupo G": ["🇧🇪 Bélgica", "🇪🇬 Egipto", "🇮🇷 Irán", "🇳🇿 Nueva Zelanda"],
-            "Grupo H": ["🇪🇸 España", "🇨🇻 Cabo Verde", "🇸🇦 Arabia Saudita", "🇺🇾 Uruguay"],
-            "Grupo I": ["🇫🇷 Francia", "🇸🇳 Senegal", "🇮🇶 Irak", "🇳🇴 Noruega"],
-            "Grupo J": ["🇦🇷 Argentina", "🇩🇿 Argelia", "🇦🇹 Austria", "🇯🇴 Jordania"],
-            "Grupo K": ["🇵🇹 Portugal", "🇨🇩 RD Congo", "🇺🇿 Uzbekistán", "🇨🇴 Colombia"],
-            "Grupo L": ["🏴󠁧󠁢󠁥󠁮󠁧󠁿 Inglaterra", "🇭🇷 Croacia", "🇬🇭 Ghana", "🇵🇦 Panamá"]
-        }
-        todos = [e for g in mundial_grupos.values() for e in g]
-        for eq in todos:
-            if f"cb_{eq}" not in st.session_state: st.session_state[f"cb_{eq}"] = False
+        nombre = st.text_input("👤 Tu nombre completo")
         
-        # ... (Aquí va el resto de tu lógica de checkboxes y botones originales)
-        if st.button("🚀 Enviar"):
-            sh.worksheet("Participantes").append_row([nombre_usuario, ", ".join([e for e in todos if st.session_state[f"cb_{e}"]])])
-            st.success("Registrado")
-    
-    else:
-        st.write(f"### Fase de Eliminatoria ({fase_actual}vos)")
-        st.info("El sistema de Brackets automáticos está activo.")
-        # AQUÍ ES DONDE GENERAREMOS LOS RADIOS DE LOS PARTIDOS M73, M74, etc.
+        # Botones de ayuda
+        col1, col2 = st.columns(2)
+        if col1.button("🎲 Aleatorio"):
+            for eq in todos: st.session_state[f"cb_{eq}"] = False
+            for eq in random.sample(todos, 32): st.session_state[f"cb_{eq}"] = True
+            st.rerun()
+        if col2.button("🧹 Limpiar"):
+            for eq in todos: st.session_state[f"cb_{eq}"] = False
+            st.rerun()
 
-# ==========================================
-# SECCIÓN: LEADERBOARD
-# ==========================================
-with pestana_leaderboard:
-    # (Tu lógica original de tabla de posiciones se mantiene aquí)
-    if st.button("🔄 Actualizar"): st.rerun()
+        # DIBUJAR LOS GRUPOS CON CHECKBOXES
+        for grupo, equipos in mundial_grupos.items():
+            with st.expander(grupo, expanded=False):
+                for eq in equipos:
+                    if f"cb_{eq}" not in st.session_state: st.session_state[f"cb_{eq}"] = False
+                    st.checkbox(eq, key=f"cb_{eq}")
+
+        # ENVÍO
+        if st.button("🚀 Enviar Registro"):
+            sel = [eq for eq in todos if st.session_state.get(f"cb_{eq}")]
+            if len(sel) == 32:
+                sh.worksheet("Participantes").append_row([nombre, ", ".join(sel)])
+                st.success("¡Registrado!")
+            else: st.error(f"Selecciona exactamente 32. Llevas {len(sel)}.")
+    else:
+        st.info("La Fase de Grupos ha cerrado. Espera la configuración de los Brackets.")
+
+with pestana_leader:
+    # (Aquí va tu lógica de la tabla de posiciones que ya tenías)
+    st.write("Cargando posiciones...")
