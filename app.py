@@ -33,8 +33,8 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<p class="big-title">🏆 LA QUINIELA MUNDIALISTA 2026</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Plataforma oficial de predictions y resultados en tiempo real.</p>', unsafe_allow_html=True)
+st.markdown('<p class="big-title">🏆 QUINIELA PRRONA MUNDIALISTA 2026</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Que La Fuerza Los Acompañe.</p>', unsafe_allow_html=True)
 
 # DICCIONARIO MAESTRO DE BANDERAS (Para transformar texto plano de Sheets a visual estético)
 DICCIONARIO_BANDERAS = {
