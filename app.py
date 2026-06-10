@@ -28,13 +28,11 @@ st.markdown("""
 st.markdown('<p class="big-title">🏆 LA QUINIELA MUNDIALISTA 2026</p>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Plataforma oficial de predicciones y resultados en tiempo real.</p>', unsafe_allow_html=True)
 
-# FUNCIÓN AUXILIAR: Limpia banderas, emojis y espacios para comparar solo texto puro
+# FUNCIÓN AUXILIAR: Limpia banderas, emojis y espacios
 def limpiar_texto_equipo(texto):
     if not texto:
         return ""
-    # Remover caracteres especiales y emojis (conservando letras latinas y acentos)
     texto_limpio = re.sub(r'[^a-zA-ZáéíóúÁÉÍÓÚñÑ ]', '', str(texto))
-    # Quitar espacios dobles y pasar a mayúsculas para homologar
     return " ".join(texto_limpio.split()).upper()
 
 # 2. CONEXIÓN CENTRALIZADA A GOOGLE SHEETS
@@ -58,18 +56,54 @@ def conectar_google_sheets():
     gc = gspread.service_account_from_dict(credenciales)
     return gc.open_by_url(gsheets_conf["spreadsheet"])
 
-# Obtener Fase Actual del Torneo
-try:
+# --- FUNCIONES CON CACHÉ PARA EVITAR EL ERROR 429 ---
+# Guarda los datos en caché por 10 minutos (600 segundos) para no saturar a Google
+@st.cache_data(ttl=600)
+def cargar_datos_sheets():
     sh = conectar_google_sheets()
+    
+    # Leer Fase Actual
     try:
         ws_fase = sh.worksheet("Fase_Actual")
-        fase_actual = int(ws_fase.acell('A1').value)
-    except Exception:
-        fase_actual = 1
+        fase = int(ws_fase.acell('A1').value)
+    except:
+        fase = 1
+        
+    # Leer Participantes Grupos
+    ws_participantes = sh.get_worksheet(0)
+    datos_p = ws_participantes.get_all_values()
+    
+    # Leer Resultados Oficiales
+    try:
+        ws_oficial = sh.worksheet("Resultados_Oficiales")
+        oficiales_f1 = [row for row in ws_oficial.col_values(1)[1:] if row]
+    except:
+        oficiales_f1 = []
+        
+    # Leer Partidos Eliminatorias
+    try:
+        ws_partidos = sh.worksheet("Eliminatorias_Partidos")
+        partidos_totales = ws_partidos.get_all_records()
+    except:
+        partidos_totales = []
+        
+    # Leer Votos Eliminatorias
+    try:
+        ws_votos = sh.worksheet("Eliminatorias_Votos")
+        votos_totales = ws_votos.get_all_records()
+    except:
+        votos_totales = []
+        
+    return fase, datos_p, oficiales_f1, partidos_totales, votos_totales
+
+# Cargar los datos de forma optimizada
+try:
+    fase_actual, datos_p, oficiales_f1, partidos_totales, votos_totales = cargar_datos_sheets()
 except Exception as e:
-    st.error("Error crítico en la conexión con la base de datos.")
+    st.error("Error al obtener los datos de Google Sheets.")
     st.code(e)
     st.stop()
+
 
 # 3. MENÚ PRINCIPAL (Pestañas de la App)
 pestana_registro, pestana_leaderboard = st.tabs(["📝 Registrar Predicciones", "📊 Tabla de Posiciones"])
@@ -91,13 +125,12 @@ mundial_grupos = {
 todos_los_equipos = [equipo for grupo in mundial_grupos.values() for equipo in grupo]
 
 # ==========================================
-# SECCIÓN 1: REGISTRAR QUINIELA (DINÁMICA)
+# SECCIÓN 1: REGISTRAR QUINIELA
 # ==========================================
 with pestana_registro:
     nombre_usuario = st.text_input("👤 Escribe tu nombre completo:", placeholder="Ej. Víctor Rodríguez", key="user_name")
     st.write("---")
 
-    # MODO FASE 1: GRUPOS
     if fase_actual == 1:
         st.subheader("⚽ Fase de Grupos: Tus 32 Clasificados")
         
@@ -152,29 +185,29 @@ with pestana_registro:
             st.success(f"¡Listo, {nombre_usuario}! Has seleccionado exactamente 32 equipos.")
             if st.button("🚀 Enviar mi Quiniela Oficial"):
                 try:
+                    sh = conectar_google_sheets()
                     ws_registro = sh.get_worksheet(0)
                     equipos_texto = ", ".join(sorted(equipos_seleccionados))
                     ws_registro.append_row([nombre_usuario.strip(), equipos_texto])
+                    st.cache_data.clear() # Limpia caché para forzar recarga al enviar
                     st.balloons()
                     st.success("¡Tu quiniela de grupos ha sido registrada con éxito! 🏆")
                 except Exception as e:
-                    st.error("Error de escritura en la pestaña principal.")
+                    st.error("Error de escritura en el servidor.")
         else:
             st.warning(f"Asegúrate de completar tu selección. Llevas {total_seleccionados} de 32 equipos.")
 
-    # MODO MULTIFASE: BRACKETS (16vos en adelante)
     else:
         st.subheader(f"🏁 Ronda Eliminatoria: {fase_actual}vos de Final")
         st.write("Selecciona al equipo que ganará en cada partido directo.")
         
-        try:
-            ws_partidos = sh.worksheet("Eliminatorias_Partidos")
-            df_partidos = pd.DataFrame(ws_partidos.get_all_records())
-            
+        df_partidos = pd.DataFrame(partidos_totales)
+        if df_partidos.empty:
+            st.info(f"El Comisionado aún no ha estructurado los partidos de la ronda de {fase_actual}vos en Sheets.")
+        else:
             partidos_fase = df_partidos[df_partidos['Fase'] == fase_actual]
-            
             if partidos_fase.empty:
-                st.info(f"El Comisionado aún no ha estructurado los partidos de la ronda de {fase_actual}vos en Sheets.")
+                st.info(f"No hay partidos activos para la fase {fase_actual}.")
             else:
                 if not nombre_usuario.strip():
                     st.info("💡 Coloca tu nombre arriba para poder registrar tus votos.")
@@ -192,38 +225,34 @@ with pestana_registro:
                     st.write("---")
                 
                 if nombre_usuario.strip() and st.button("💾 Enviar Mis Pronósticos"):
-                    ws_votos = sh.worksheet("Eliminatorias_Votos")
-                    filas_batch = []
-                    for part_id, equipo_votado in votos_formulario.items():
-                        filas_batch.append([nombre_usuario.strip(), fase_actual, part_id, equipo_votado])
-                    
-                    ws_votos.append_rows(filas_batch)
-                    st.balloons()
-                    st.success(f"¡Votos para la ronda {fase_actual}vos registrados!")
-        except Exception as e:
-            st.error("No se pudo cargar la hoja 'Eliminatorias_Partidos'.")
+                    try:
+                        sh = conectar_google_sheets()
+                        ws_votos = sh.worksheet("Eliminatorias_Votos")
+                        filas_batch = []
+                        for part_id, equipo_votado in votos_formulario.items():
+                            filas_batch.append([nombre_usuario.strip(), fase_actual, part_id, equipo_votado])
+                        
+                        ws_votos.append_rows(filas_batch)
+                        st.cache_data.clear() # Limpia caché para actualizar las tablas
+                        st.balloons()
+                        st.success(f"¡Votos para la ronda {fase_actual}vos registrados!")
+                    except Exception as e:
+                        st.error("Error al guardar los votos.")
 
 # ==========================================
-# SECCIÓN 2: LEADERBOARD (SUMATORIA INTELIGENTE)
+# SECCIÓN 2: LEADERBOARD
 # ==========================================
 with pestana_leaderboard:
     st.markdown("### 📊 Clasificación General Acumulativa")
     
-    if st.button("🔄 Actualizar Clasificación"):
+    # Botón manual para romper la caché y obligar a leer a Google Sheets en tiempo real
+    if st.button("🔄 Forzar Actualización desde Google Sheets"):
+        st.cache_data.clear()
         st.rerun()
 
     try:
-        # 1. Puntos de Fase de Grupos
-        ws_participantes = sh.get_worksheet(0)
-        datos_p = ws_participantes.get_all_values()
-        
-        try:
-            ws_oficial = sh.worksheet("Resultados_Oficiales")
-            # Limpiamos los resultados oficiales guardados en Sheets
-            resultados_oficiales_f1 = set([limpiar_texto_equipo(row) for row in ws_oficial.col_values(1)[1:] if row])
-        except Exception:
-            resultados_oficiales_f1 = set()
-
+        # Limpiar resultados oficiales de grupos
+        resultados_oficiales_f1 = set([limpiar_texto_equipo(row) for row in oficiales_f1 if row])
         puntuacion_global = {}
 
         if len(datos_p) > 1:
@@ -231,7 +260,6 @@ with pestana_leaderboard:
             for fila in filas_usuarios:
                 if len(fila) < 2: continue
                 nombre = fila[0].strip()
-                # Limpiamos cada equipo elegido por el usuario antes de comparar
                 lista_equipos_usuario = set([limpiar_texto_equipo(e) for e in fila[1].split(",")])
                 
                 aciertos_f1 = len(lista_equipos_usuario & resultados_oficiales_f1)
@@ -242,34 +270,23 @@ with pestana_leaderboard:
                     "Total ⭐": aciertos_f1
                 }
 
-        # 2. Puntos de Eliminatorias Directas con Blindaje de Texto Puro
-        try:
-            ws_partidos = sh.worksheet("Eliminatorias_Partidos")
-            partidos_totales = ws_partidos.get_all_records()
-            
-            # Almacenamos el ganador oficial ya procesado y limpio
+        # Procesar eliminatorias de forma local usando la data precargada
+        if partidos_totales:
             dict_ganadores_reales = {
                 p['Partido_ID']: limpiar_texto_equipo(p['Ganador_Oficial']) 
                 for p in partidos_totales if p['Ganador_Oficial']
             }
             
-            ws_votos = sh.worksheet("Eliminatorias_Votos")
-            votos_totales = ws_votos.get_all_records()
-            
             for v in votos_totales:
                 u_nombre = v['Nombre'].strip()
                 p_id = v['Partido_ID']
-                u_voto = limpiar_texto_equipo(v['Voto_Usuario']) # Limpieza del voto del usuario
+                u_voto = limpiar_texto_equipo(v['Voto_Usuario'])
                 
                 if u_nombre in puntuacion_global and p_id in dict_ganadores_reales:
-                    # Comparación limpia 100% libre de emojis o errores de dedo
                     if u_voto == dict_ganadores_reales[p_id]:
                         puntuacion_global[u_nombre]["Eliminatorias 🏆"] += 1
                         puntuacion_global[u_nombre]["Total ⭐"] += 1
-        except Exception:
-            pass
 
-        # Mostrar Tabla de Standings
         if puntuacion_global:
             ranking_list = [{"Participante": k, **v} for k, v in puntuacion_global.items()]
             df_final = pd.DataFrame(ranking_list).sort_values(by="Total ⭐", ascending=False).reset_index(drop=True)
