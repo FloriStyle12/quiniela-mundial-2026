@@ -28,12 +28,22 @@ st.markdown("""
 st.markdown('<p class="big-title">🏆 LA QUINIELA MUNDIALISTA 2026</p>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Plataforma oficial de predicciones y resultados en tiempo real.</p>', unsafe_allow_html=True)
 
-# FUNCIÓN AUXILIAR: Limpia banderas, emojis y espacios
+# FUNCIÓN AUXILIAR CRÍTICA: Elimina acentos, banderas, espacios y mayúsculas para comparar texto puro
 def limpiar_texto_equipo(texto):
     if not texto:
         return ""
-    texto_limpio = re.sub(r'[^a-zA-ZáéíóúÁÉÍÓÚñÑ ]', '', str(texto))
-    return " ".join(texto_limpio.split()).upper()
+    # Pasar a minúsculas
+    t = str(texto).lower()
+    # Quitar acentos comunes
+    t = re.sub(r'[áàäâ]', 'a', t)
+    t = re.sub(r'[éèëê]', 'e', t)
+    t = re.sub(r'[íìïî]', 'i', t)
+    t = re.sub(r'[óòöô]', 'o', t)
+    t = re.sub(r'[úùüû]', 'u', t)
+    # Remover todo lo que no sean letras o espacios (así vuela cualquier bandera o emoji)
+    t = re.sub(r'[^a-zñ ]', '', t)
+    # Limpiar espacios dobles
+    return " ".join(t.split())
 
 # 2. CONEXIÓN CENTRALIZADA A GOOGLE SHEETS
 def conectar_google_sheets():
@@ -57,7 +67,6 @@ def conectar_google_sheets():
     return gc.open_by_url(gsheets_conf["spreadsheet"])
 
 # --- FUNCIONES CON CACHÉ PARA EVITAR EL ERROR 429 ---
-# Guarda los datos en caché por 10 minutos (600 segundos) para no saturar a Google
 @st.cache_data(ttl=600)
 def cargar_datos_sheets():
     sh = conectar_google_sheets()
@@ -96,7 +105,7 @@ def cargar_datos_sheets():
         
     return fase, datos_p, oficiales_f1, partidos_totales, votos_totales
 
-# Cargar los datos de forma optimizada
+# Cargar datos optimizados
 try:
     fase_actual, datos_p, oficiales_f1, partidos_totales, votos_totales = cargar_datos_sheets()
 except Exception as e:
@@ -189,7 +198,7 @@ with pestana_registro:
                     ws_registro = sh.get_worksheet(0)
                     equipos_texto = ", ".join(sorted(equipos_seleccionados))
                     ws_registro.append_row([nombre_usuario.strip(), equipos_texto])
-                    st.cache_data.clear() # Limpia caché para forzar recarga al enviar
+                    st.cache_data.clear()
                     st.balloons()
                     st.success("¡Tu quiniela de grupos ha sido registrada con éxito! 🏆")
                 except Exception as e:
@@ -233,25 +242,24 @@ with pestana_registro:
                             filas_batch.append([nombre_usuario.strip(), fase_actual, part_id, equipo_votado])
                         
                         ws_votos.append_rows(filas_batch)
-                        st.cache_data.clear() # Limpia caché para actualizar las tablas
+                        st.cache_data.clear()
                         st.balloons()
                         st.success(f"¡Votos para la ronda {fase_actual}vos registrados!")
                     except Exception as e:
                         st.error("Error al guardar los votos.")
 
 # ==========================================
-# SECCIÓN 2: LEADERBOARD
+# SECCIÓN 2: LEADERBOARD (TABLA DE POSICIONES)
 # ==========================================
 with pestana_leaderboard:
     st.markdown("### 📊 Clasificación General Acumulativa")
     
-    # Botón manual para romper la caché y obligar a leer a Google Sheets en tiempo real
     if st.button("🔄 Forzar Actualización desde Google Sheets"):
         st.cache_data.clear()
         st.rerun()
 
     try:
-        # Limpiar resultados oficiales de grupos
+        # CORRECCIÓN AQUÍ: Ahora limpiamos al 100% las respuestas oficiales de grupos de la hoja
         resultados_oficiales_f1 = set([limpiar_texto_equipo(row) for row in oficiales_f1 if row])
         puntuacion_global = {}
 
@@ -260,8 +268,11 @@ with pestana_leaderboard:
             for fila in filas_usuarios:
                 if len(fila) < 2: continue
                 nombre = fila[0].strip()
+                
+                # CORRECCIÓN AQUÍ: Limpiamos las selecciones que guardó el usuario en la app antes de cruzar datos
                 lista_equipos_usuario = set([limpiar_texto_equipo(e) for e in fila[1].split(",")])
                 
+                # Intersección matemática limpia (ej. "mexico" == "mexico")
                 aciertos_f1 = len(lista_equipos_usuario & resultados_oficiales_f1)
                 
                 puntuacion_global[nombre] = {
