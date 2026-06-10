@@ -4,7 +4,9 @@ import os
 import gspread
 import toml
 
-# 1. CONEXIÓN (Mantenemos tu configuración actual)
+# 1. CONFIGURACIÓN
+st.set_page_config(page_title="Quiniela Mundial 2026", layout="centered")
+
 @st.cache_resource
 def conectar():
     ruta = os.path.join(".streamlit", "secrets.toml")
@@ -20,14 +22,24 @@ def conectar():
     }
     return gspread.service_account_from_dict(creds).open_by_url(conf["spreadsheet"])
 
-# 2. DEFINICIÓN DE EQUIPOS (Tus grupos originales)
+# 2. EQUIPOS
 mundial_grupos = {
     "Grupo A": ["🇲🇽 México", "🇿🇦 Sudáfrica", "🇰🇷 Corea del Sur", "🇨🇿 República Checa"],
-    # ... (El resto de tus grupos aquí, como los tenías)
+    "Grupo B": ["🇨🇦 Canadá", "🇧🇦 Bosnia y Herzegovina", "🇶🇦 Catar", "🇨🇭 Suiza"],
+    "Grupo C": ["🇧🇷 Brasil", "🇲🇦 Marruecos", "🇭🇹 Haití", "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Escocia"],
+    "Grupo D": ["🇺🇸 Estados Unidos", "🇵🇾 Paraguay", "🇦🇺 Australia", "🇹🇷 Turquía"],
+    "Grupo E": ["🇩🇪 Alemania", "🇨🇼 Curazao", "🇨🇮 Costa de Marfil", "🇪🇨 Ecuador"],
+    "Grupo F": ["🇳🇱 Países Bajos", "🇯🇵 Japón", "🇸🇪 Suecia", "🇹🇳 Túnez"],
+    "Grupo G": ["🇧🇪 Bélgica", "🇪🇬 Egipto", "🇮🇷 Irán", "🇳🇿 Nueva Zelanda"],
+    "Grupo H": ["🇪🇸 España", "🇨🇻 Cabo Verde", "🇸🇦 Arabia Saudita", "🇺🇾 Uruguay"],
+    "Grupo I": ["🇫🇷 Francia", "🇸🇳 Senegal", "🇮🇶 Irak", "🇳🇴 Noruega"],
+    "Grupo J": ["🇦🇷 Argentina", "🇩🇿 Argelia", "🇦🇹 Austria", "🇯🇴 Jordania"],
+    "Grupo K": ["🇵🇹 Portugal", "🇨🇩 RD Congo", "🇺🇿 Uzbekistán", "🇨🇴 Colombia"],
+    "Grupo L": ["🏴󠁧󠁢󠁥󠁮󠁧󠁿 Inglaterra", "🇭🇷 Croacia", "🇬🇭 Ghana", "🇵🇦 Panamá"]
 }
 todos = [eq for grupo in mundial_grupos.values() for eq in grupo]
 
-# 3. LÓGICA DE FASE (Ajustada a tus nombres de pestañas)
+# 3. LÓGICA PRINCIPAL
 sh = conectar()
 try:
     # Lee la fase de la pestaña 'Fase_Actual' celda A1
@@ -42,13 +54,18 @@ if fase_actual == 1:
     st.write("### Fase 1: Selección de 32 equipos")
     nombre = st.text_input("👤 Tu nombre")
     
-    # Inicialización de estado
+    # Inicializar estado para los 48 checkboxes
     for eq in todos:
         if f"cb_{eq}" not in st.session_state: st.session_state[f"cb_{eq}"] = False
         
-    if st.button("🎲 Aleatorio"):
+    col1, col2 = st.columns(2)
+    if col1.button("🎲 Aleatorio"):
         for eq in todos: st.session_state[f"cb_{eq}"] = False
-        for eq in random.sample(todos, 32): st.session_state[f"cb_{eq}"] = True
+        # Selecciona 32 al azar de los que existan en la lista
+        for eq in random.sample(todos, min(len(todos), 32)): st.session_state[f"cb_{eq}"] = True
+        st.rerun()
+    if col2.button("🧹 Limpiar"):
+        for eq in todos: st.session_state[f"cb_{eq}"] = False
         st.rerun()
 
     for grupo, equipos in mundial_grupos.items():
@@ -57,10 +74,15 @@ if fase_actual == 1:
     
     if st.button("Enviar Registro"):
         sel = [eq for eq in todos if st.session_state[f"cb_{eq}"]]
-        # Usa tu pestaña existente 'Participantes'
-        sh.worksheet("Participantes").append_row([nombre, ", ".join(sel)])
-        st.success("¡Registrado en 'Participantes'!")
+        if len(sel) != 32:
+            st.error(f"Debes seleccionar exactamente 32 equipos. Llevas: {len(sel)}")
+        else:
+            sh.worksheet("Participantes").append_row([nombre, ", ".join(sel)])
+            st.success("¡Registrado en 'Participantes'!")
 
 elif fase_actual > 1:
     st.write(f"### Fase Eliminatoria (Fase {fase_actual})")
-    # Aquí irá tu lógica para registrar en 'Respuestas_Fases'
+    st.info("La plataforma está esperando tus datos de esta fase.")
+
+st.write("---")
+if st.button("🔄 Actualizar"): st.rerun()
