@@ -5,18 +5,16 @@ import toml
 import os
 import gspread
 
-# 1. CONFIGURACIÓN
+# 1. CONFIGURACIÓN Y ESTILO PRO
 st.set_page_config(page_title="La Quiniela Pro 2026", page_icon="⚽", layout="centered")
-
-# Estilos para asegurar que se vea bien en celular
 st.markdown("""
     <style>
-    .big-title { font-size:28px !important; font-weight: bold; color: #1E3A8A; text-align: center; }
-    .stCheckbox { font-size: 16px !important; }
+    .big-title { font-size:32px !important; font-weight: bold; color: #1E3A8A; text-align: center; }
+    .subtitle { font-size:16px !important; text-align: center; color: #4B5563; margin-bottom: 20px; }
     </style>
 """, unsafe_allow_html=True)
 
-# 2. CONEXIÓN
+# 2. CONEXIÓN (Misma de siempre)
 @st.cache_resource
 def conectar():
     ruta = os.path.join(".streamlit", "secrets.toml")
@@ -32,7 +30,7 @@ def conectar():
     }
     return gspread.service_account_from_dict(creds).open_by_url(conf["spreadsheet"])
 
-# 3. EQUIPOS
+# 3. DATOS DE EQUIPOS
 mundial_grupos = {
     "Grupo A": ["🇲🇽 México", "🇿🇦 Sudáfrica", "🇰🇷 Corea del Sur", "🇨🇿 República Checa"],
     "Grupo B": ["🇨🇦 Canadá", "🇧🇦 Bosnia y Herzegovina", "🇶🇦 Catar", "🇨🇭 Suiza"],
@@ -49,22 +47,21 @@ mundial_grupos = {
 }
 todos = [eq for grupo in mundial_grupos.values() for eq in grupo]
 
-# 4. LÓGICA DE FASE
+# 4. LÓGICA DE FASE Y APP
 sh = conectar()
 try:
-    fase_valor = sh.worksheet("Fase_Actual").acell('A1').value
-    fase_actual = int(fase_valor) if fase_valor and fase_valor.isdigit() else 1
+    fase_actual = int(sh.worksheet("Fase_Actual").acell('A1').value or 1)
 except: fase_actual = 1
 
 st.markdown('<p class="big-title">🏆 QUINIELA MUNDIALISTA 2026</p>', unsafe_allow_html=True)
+pestana1, pestana2 = st.tabs(["📝 Registrar Quiniela", "📊 Tabla de Posiciones"])
 
-pestana_reg, pestana_leader = st.tabs(["📝 Registrar", "📊 Posiciones"])
-
-with pestana_reg:
+with pestana1:
     if fase_actual == 1:
         nombre = st.text_input("👤 Tu nombre completo")
+        for eq in todos:
+            if f"cb_{eq}" not in st.session_state: st.session_state[f"cb_{eq}"] = False
         
-        # Botones de ayuda
         col1, col2 = st.columns(2)
         if col1.button("🎲 Aleatorio"):
             for eq in todos: st.session_state[f"cb_{eq}"] = False
@@ -74,23 +71,34 @@ with pestana_reg:
             for eq in todos: st.session_state[f"cb_{eq}"] = False
             st.rerun()
 
-        # DIBUJAR LOS GRUPOS CON CHECKBOXES
         for grupo, equipos in mundial_grupos.items():
-            with st.expander(grupo, expanded=False):
-                for eq in equipos:
-                    if f"cb_{eq}" not in st.session_state: st.session_state[f"cb_{eq}"] = False
-                    st.checkbox(eq, key=f"cb_{eq}")
-
-        # ENVÍO
+            with st.expander(grupo):
+                for eq in equipos: st.checkbox(eq, key=f"cb_{eq}")
+        
         if st.button("🚀 Enviar Registro"):
             sel = [eq for eq in todos if st.session_state.get(f"cb_{eq}")]
             if len(sel) == 32:
                 sh.worksheet("Participantes").append_row([nombre, ", ".join(sel)])
                 st.success("¡Registrado!")
-            else: st.error(f"Selecciona exactamente 32. Llevas {len(sel)}.")
+            else: st.error(f"Selecciona 32 equipos. Llevas {len(sel)}")
     else:
-        st.info("La Fase de Grupos ha cerrado. Espera la configuración de los Brackets.")
+        st.info(f"Fase {fase_actual}vos en curso. Esperando configuración de brackets.")
 
-with pestana_leader:
-    # (Aquí va tu lógica de la tabla de posiciones que ya tenías)
-    st.write("Cargando posiciones...")
+with pestana2:
+    if st.button("🔄 Actualizar Tabla"): st.rerun()
+    try:
+        data = sh.worksheet("Participantes").get_all_values()[1:]
+        try:
+            oficiales = [row[0] for row in sh.worksheet("Resultados_Oficiales").get_all_values()[1:] if row[0]]
+        except: oficiales = []
+        
+        tabla = []
+        for row in data:
+            if len(row) > 1:
+                aciertos = len(set([p.strip() for p in row[1].split(",")]) & set(oficiales))
+                tabla.append({"Participante": row[0], "Aciertos ⭐": aciertos})
+        
+        df = pd.DataFrame(tabla).sort_values(by="Aciertos ⭐", ascending=False).reset_index(drop=True)
+        df.index = df.index + 1
+        st.dataframe(df, use_container_width=True)
+    except Exception as e: st.error("Aún no hay datos para mostrar.")
