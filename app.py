@@ -4,6 +4,7 @@ import random
 import toml
 import os
 import gspread
+import re
 
 # 1. CONFIGURACIÓN DE LA PÁGINA
 st.set_page_config(
@@ -27,7 +28,16 @@ st.markdown("""
 st.markdown('<p class="big-title">🏆 LA QUINIELA MUNDIALISTA 2026</p>', unsafe_allow_html=True)
 st.markdown('<p class="subtitle">Plataforma oficial de predicciones y resultados en tiempo real.</p>', unsafe_allow_html=True)
 
-# 2. CONEXIÓN CENTRALIZADA A GOOGLE SHEETS (La versión de anoche que sí funciona)
+# FUNCIÓN AUXILIAR: Limpia banderas, emojis y espacios para comparar solo texto puro
+def limpiar_texto_equipo(texto):
+    if not texto:
+        return ""
+    # Remover caracteres especiales y emojis (conservando letras latinas y acentos)
+    texto_limpio = re.sub(r'[^a-zA-ZáéíóúÁÉÍÓÚñÑ ]', '', str(texto))
+    # Quitar espacios dobles y pasar a mayúsculas para homologar
+    return " ".join(texto_limpio.split()).upper()
+
+# 2. CONEXIÓN CENTRALIZADA A GOOGLE SHEETS
 def conectar_google_sheets():
     ruta_secretos = os.path.join(".streamlit", "secrets.toml")
     secretos_dict = toml.load(ruta_secretos)
@@ -48,14 +58,14 @@ def conectar_google_sheets():
     gc = gspread.service_account_from_dict(credenciales)
     return gc.open_by_url(gsheets_conf["spreadsheet"])
 
-# Obtener Fase Actual del Torneo desde el controlador central en Sheets
+# Obtener Fase Actual del Torneo
 try:
     sh = conectar_google_sheets()
     try:
         ws_fase = sh.worksheet("Fase_Actual")
         fase_actual = int(ws_fase.acell('A1').value)
     except Exception:
-        fase_actual = 1  # Por si no encuentra la celda, por defecto Grupos
+        fase_actual = 1
 except Exception as e:
     st.error("Error crítico en la conexión con la base de datos.")
     st.code(e)
@@ -81,23 +91,21 @@ mundial_grupos = {
 todos_los_equipos = [equipo for grupo in mundial_grupos.values() for equipo in grupo]
 
 # ==========================================
-# SECCIÓN 1: REGISTRAR QUINIELA (DINÁMICA POR FASE)
+# SECCIÓN 1: REGISTRAR QUINIELA (DINÁMICA)
 # ==========================================
 with pestana_registro:
     nombre_usuario = st.text_input("👤 Escribe tu nombre completo:", placeholder="Ej. Víctor Rodríguez", key="user_name")
     st.write("---")
 
-    # MODO FASE 1: GRUPOS (Tu código original con esteroides de control)
+    # MODO FASE 1: GRUPOS
     if fase_actual == 1:
         st.subheader("⚽ Fase de Grupos: Tus 32 Clasificados")
         
-        # Inicializar estados de los checkboxes
         for eq in todos_los_equipos:
             clave_eq = f"cb_{eq}"
             if clave_eq not in st.session_state:
                 st.session_state[clave_eq] = False
 
-        # BARRA LATERAL (Panel de control integrado)
         st.sidebar.header("⚙️ Panel de Control")
         if st.sidebar.button("🎲 Llenar 32 Equipos (Random)"):
             for eq in todos_los_equipos:
@@ -115,7 +123,6 @@ with pestana_registro:
         equipos_seleccionados = [eq for eq in todos_los_equipos if st.session_state[f"cb_{eq}"]]
         total_seleccionados = len(equipos_seleccionados)
 
-        # Renderizado de grupos divididos por subtabs
         sub_tabs = st.tabs(["📌 Grupos A - D", "📌 Grupos E - H", "📌 Grupos I - L"])
 
         def dibujar_grupo(nombre_grupo):
@@ -155,16 +162,15 @@ with pestana_registro:
         else:
             st.warning(f"Asegúrate de completar tu selección. Llevas {total_seleccionados} de 32 equipos.")
 
-    # MODO MULTIFASE: BRACKETS (16vos, 8vos, 4tos, etc.)
+    # MODO MULTIFASE: BRACKETS (16vos en adelante)
     else:
         st.subheader(f"🏁 Ronda Eliminatoria: {fase_actual}vos de Final")
-        st.write("Selecciona al equipo que ganará en cada partido directo que armó el comisionado.")
+        st.write("Selecciona al equipo que ganará en cada partido directo.")
         
         try:
             ws_partidos = sh.worksheet("Eliminatorias_Partidos")
             df_partidos = pd.DataFrame(ws_partidos.get_all_records())
             
-            # Filtramos únicamente los partidos de la fase activa cargada en Sheets
             partidos_fase = df_partidos[df_partidos['Fase'] == fase_actual]
             
             if partidos_fase.empty:
@@ -198,7 +204,7 @@ with pestana_registro:
             st.error("No se pudo cargar la hoja 'Eliminatorias_Partidos'.")
 
 # ==========================================
-# SECCIÓN 2: LEADERBOARD (SUMATORIA ACUMULATIVA PRO)
+# SECCIÓN 2: LEADERBOARD (SUMATORIA INTELIGENTE)
 # ==========================================
 with pestana_leaderboard:
     st.markdown("### 📊 Clasificación General Acumulativa")
@@ -207,13 +213,14 @@ with pestana_leaderboard:
         st.rerun()
 
     try:
-        # 1. Procesar Puntos de Fase de Grupos
+        # 1. Puntos de Fase de Grupos
         ws_participantes = sh.get_worksheet(0)
         datos_p = ws_participantes.get_all_values()
         
         try:
             ws_oficial = sh.worksheet("Resultados_Oficiales")
-            resultados_oficiales_f1 = set([row for row in ws_oficial.col_values(1)[1:] if row])
+            # Limpiamos los resultados oficiales guardados en Sheets
+            resultados_oficiales_f1 = set([limpiar_texto_equipo(row) for row in ws_oficial.col_values(1)[1:] if row])
         except Exception:
             resultados_oficiales_f1 = set()
 
@@ -224,9 +231,9 @@ with pestana_leaderboard:
             for fila in filas_usuarios:
                 if len(fila) < 2: continue
                 nombre = fila[0].strip()
-                lista_equipos_usuario = set([e.strip() for e in fila[1].split(",")])
+                # Limpiamos cada equipo elegido por el usuario antes de comparar
+                lista_equipos_usuario = set([limpiar_texto_equipo(e) for e in fila[1].split(",")])
                 
-                # Intersección matemática para puntos de grupos
                 aciertos_f1 = len(lista_equipos_usuario & resultados_oficiales_f1)
                 
                 puntuacion_global[nombre] = {
@@ -235,12 +242,16 @@ with pestana_leaderboard:
                     "Total ⭐": aciertos_f1
                 }
 
-        # 2. Procesar y Sumar Puntos de Eliminatorias Directas
+        # 2. Puntos de Eliminatorias Directas con Blindaje de Texto Puro
         try:
             ws_partidos = sh.worksheet("Eliminatorias_Partidos")
             partidos_totales = ws_partidos.get_all_records()
-            # Diccionario indexado {Partido_ID: Ganador_Oficial}
-            dict_ganadores_reales = {p['Partido_ID']: str(p['Ganador_Oficial']).strip() for p in partidos_totales if p['Ganador_Oficial']}
+            
+            # Almacenamos el ganador oficial ya procesado y limpio
+            dict_ganadores_reales = {
+                p['Partido_ID']: limpiar_texto_equipo(p['Ganador_Oficial']) 
+                for p in partidos_totales if p['Ganador_Oficial']
+            }
             
             ws_votos = sh.worksheet("Eliminatorias_Votos")
             votos_totales = ws_votos.get_all_records()
@@ -248,16 +259,17 @@ with pestana_leaderboard:
             for v in votos_totales:
                 u_nombre = v['Nombre'].strip()
                 p_id = v['Partido_ID']
-                u_voto = str(v['Voto_Usuario']).strip()
+                u_voto = limpiar_texto_equipo(v['Voto_Usuario']) # Limpieza del voto del usuario
                 
                 if u_nombre in puntuacion_global and p_id in dict_ganadores_reales:
+                    # Comparación limpia 100% libre de emojis o errores de dedo
                     if u_voto == dict_ganadores_reales[p_id]:
                         puntuacion_global[u_nombre]["Eliminatorias 🏆"] += 1
                         puntuacion_global[u_nombre]["Total ⭐"] += 1
         except Exception:
-            pass # Si no existen hojas de eliminatorias todavía, no rompe el flujo
+            pass
 
-        # Desplegar tabla final ordenada
+        # Mostrar Tabla de Standings
         if puntuacion_global:
             ranking_list = [{"Participante": k, **v} for k, v in puntuacion_global.items()]
             df_final = pd.DataFrame(ranking_list).sort_values(by="Total ⭐", ascending=False).reset_index(drop=True)
