@@ -8,12 +8,12 @@ import re
 
 # 1. CONFIGURACIÓN DE LA PÁGINA
 st.set_page_config(
-    page_title="La Quiniela Pro 2026", 
+    page_title="La Quiniela Prrona 2026", 
     page_icon="⚽", 
     layout="centered"
 )
 
-# Parche visual para banderas en Windows
+# Parche visual para banderas y estilos estéticos
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Twemoji+Mozilla&display=swap');
@@ -22,28 +22,66 @@ st.markdown("""
     }
     .big-title { font-size:32px !important; font-weight: bold; color: #1E3A8A; text-align: center; margin-bottom: 0px; }
     .subtitle { font-size:16px !important; text-align: center; color: #4B5563; margin-bottom: 20px; }
+    .match-box { 
+        background-color: #F3F4F6; 
+        padding: 12px; 
+        border-radius: 8px; 
+        border-left: 5px solid #1E3A8A; 
+        margin-bottom: 10px;
+    }
+    .match-title { font-weight: bold; color: #1F2937; margin-bottom: 5px; }
     </style>
 """, unsafe_allow_html=True)
 
 st.markdown('<p class="big-title">🏆 LA QUINIELA MUNDIALISTA 2026</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Plataforma oficial de predicciones y resultados en tiempo real.</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Plataforma oficial de predictions y resultados en tiempo real.</p>', unsafe_allow_html=True)
 
-# FUNCIÓN AUXILIAR CRÍTICA: Elimina acentos, banderas, espacios y mayúsculas para comparar texto puro
+# DICCIONARIO MAESTRO DE BANDERAS (Para transformar texto plano de Sheets a visual estético)
+DICCIONARIO_BANDERAS = {
+    "mexico": "🇲🇽", "sudafrica": "🇿🇦", "corea del sur": "🇰🇷", "republica checa": "🇨🇿",
+    "canada": "🇨🇦", "bosnia y herzegovina": "🇧🇦", "catar": "🇶🇦", "suiza": "🇨🇭",
+    "brasil": "🇧🇷", "marruecos": "🇲🇦", "haiti": "🇭🇹", "escocia": "🏴󠁧󠁢󠁳󠁣󠁴󠁿",
+    "estados unidos": "🇺🇸", "usa": "🇺🇸", "paraguay": "🇵🇾", "australia": "🇦🇺", "trinidad y tobago": "🇹🇹",
+    "alemania": "🇩🇪", "curazao": "🇨🇼", "costa de marfil": "🇨🇮", "ecuador": "🇪🇨",
+    "paises bajos": "🇳🇱", "holanda": "🇳🇱", "japon": "🇯🇵", "suecia": "🇸🇪", "tunez": "🇹🇳",
+    "belgica": "🇧🇪", "egipto": "🇪🇬", "iran": "🇮🇷", "nueva zelanda": "🇳🇿",
+    "espana": "🇪🇸", "cabo verde": "🇨🇻", "arabia saudita": "🇸🇦", "uruguay": "🇺🇾",
+    "francia": "🇫🇷", "senegal": "🇸🇳", "iraq": "🇮🇶", "irak": "🇮🇶", "noruega": "🇳🇴",
+    "argentina": "🇦🇷", "argelia": "🇩🇿", "austria": "🇦🇹", "jordania": "🇯🇴",
+    "portugal": "🇵🇹", "rd congo": "🇨🇩", "uzbekistan": "🇺🇿", "colombia": "🇨🇴",
+    "inglaterra": "🏴󠁧󠁢󠁥󠁮󠁧󠁿", "croacia": "🇭🇷", "ghana": "🇬🇭", "panama": "🇵🇦"
+}
+
+# MAPEO DE FASES SOLICITADO
+MAPEO_FASES = {
+    32: "⚽ Fase de Grupos",
+    16: "🏁 16vos de Final",
+    8: "🔥 8vos de Final",
+    4: "🏅 4tos de Final",
+    2: "🥵 Semifinal",
+    1: "👑 Gran Final"
+}
+
+# FUNCIÓN AUXILIAR: Limpia texto para comparaciones
 def limpiar_texto_equipo(texto):
     if not texto:
         return ""
-    # Pasar a minúsculas
     t = str(texto).lower()
-    # Quitar acentos comunes
     t = re.sub(r'[áàäâ]', 'a', t)
     t = re.sub(r'[éèëê]', 'e', t)
     t = re.sub(r'[íìïî]', 'i', t)
     t = re.sub(r'[óòöô]', 'o', t)
     t = re.sub(r'[úùüû]', 'u', t)
-    # Remover todo lo que no sean letras o espacios (así vuela cualquier bandera o emoji)
     t = re.sub(r'[^a-zñ ]', '', t)
-    # Limpiar espacios dobles
     return " ".join(t.split())
+
+# FUNCIÓN AUXILIAR: Devuelve el nombre del equipo con su bandera si existe
+def obtener_nombre_con_bandera(nombre_plano):
+    nombre_limpio = limpiar_texto_equipo(nombre_plano)
+    bandera = DICCIONARIO_BANDERAS.get(nombre_limpio, "🏳️") # Bandera blanca si no se encuentra
+    # Formatea Capitalizado (Ej: "mexico" -> "México")
+    nombre_formateado = str(nombre_plano).strip().title()
+    return f"{bandera} {nombre_formateado}"
 
 # 2. CONEXIÓN CENTRALIZADA A GOOGLE SHEETS
 def conectar_google_sheets():
@@ -66,7 +104,7 @@ def conectar_google_sheets():
     gc = gspread.service_account_from_dict(credenciales)
     return gc.open_by_url(gsheets_conf["spreadsheet"])
 
-# --- FUNCIONES CON CACHÉ PARA EVITAR EL ERROR 429 ---
+# --- FUNCIONES CON CACHÉ ---
 @st.cache_data(ttl=600)
 def cargar_datos_sheets():
     sh = conectar_google_sheets()
@@ -76,27 +114,23 @@ def cargar_datos_sheets():
         ws_fase = sh.worksheet("Fase_Actual")
         fase = int(ws_fase.acell('A1').value)
     except:
-        fase = 1
+        fase = 32 # Default a fase de grupos si falla
         
-    # Leer Participantes Grupos
     ws_participantes = sh.get_worksheet(0)
     datos_p = ws_participantes.get_all_values()
     
-    # Leer Resultados Oficiales
     try:
         ws_oficial = sh.worksheet("Resultados_Oficiales")
         oficiales_f1 = [row for row in ws_oficial.col_values(1)[1:] if row]
     except:
         oficiales_f1 = []
         
-    # Leer Partidos Eliminatorias
     try:
         ws_partidos = sh.worksheet("Eliminatorias_Partidos")
         partidos_totales = ws_partidos.get_all_records()
     except:
         partidos_totales = []
         
-    # Leer Votos Eliminatorias
     try:
         ws_votos = sh.worksheet("Eliminatorias_Votos")
         votos_totales = ws_votos.get_all_records()
@@ -105,16 +139,13 @@ def cargar_datos_sheets():
         
     return fase, datos_p, oficiales_f1, partidos_totales, votos_totales
 
-# Cargar datos optimizados
 try:
     fase_actual, datos_p, oficiales_f1, partidos_totales, votos_totales = cargar_datos_sheets()
 except Exception as e:
     st.error("Error al obtener los datos de Google Sheets.")
-    st.code(e)
     st.stop()
 
-
-# 3. MENÚ PRINCIPAL (Pestañas de la App)
+# 3. MENÚ PRINCIPAL
 pestana_registro, pestana_leaderboard = st.tabs(["📝 Registrar Predicciones", "📊 Tabla de Posiciones"])
 
 mundial_grupos = {
@@ -140,8 +171,9 @@ with pestana_registro:
     nombre_usuario = st.text_input("👤 Escribe tu nombre completo:", placeholder="Ej. Víctor Rodríguez", key="user_name")
     st.write("---")
 
-    if fase_actual == 1:
-        st.subheader("⚽ Fase de Grupos: Tus 32 Clasificados")
+    # MODO: FASE DE GRUPOS (Código 32)
+    if fase_actual == 32:
+        st.subheader(f"{MAPEO_FASES.get(fase_actual, 'Fase de Grupos')}: Tus 32 Clasificados")
         
         for eq in todos_los_equipos:
             clave_eq = f"cb_{eq}"
@@ -206,34 +238,53 @@ with pestana_registro:
         else:
             st.warning(f"Asegúrate de completar tu selección. Llevas {total_seleccionados} de 32 equipos.")
 
+    # MODO: BRACKETS ELIMINATORIOS (Códigos 16, 8, 4, 2, 1)
     else:
-        st.subheader(f"🏁 Ronda Eliminatoria: {fase_actual}vos de Final")
-        st.write("Selecciona al equipo que ganará en cada partido directo.")
+        nombre_fase_bonito = MAPEO_FASES.get(fase_actual, f"Fase {fase_actual}")
+        st.subheader(f"{nombre_fase_bonito}")
+        st.write("Selecciona al equipo que ganará en cada partido directo para avanzar de ronda.")
         
         df_partidos = pd.DataFrame(partidos_totales)
         if df_partidos.empty:
-            st.info(f"El Comisionado aún no ha estructurado los partidos de la ronda de {fase_actual}vos en Sheets.")
+            st.info("El Comisionado aún no ha estructurado los partidos en Sheets.")
         else:
             partidos_fase = df_partidos[df_partidos['Fase'] == fase_actual]
             if partidos_fase.empty:
-                st.info(f"No hay partidos activos para la fase {fase_actual}.")
+                st.info(f"No hay partidos cargados en la hoja de cálculo para la {nombre_fase_bonito}.")
             else:
                 if not nombre_usuario.strip():
                     st.info("💡 Coloca tu nombre arriba para poder registrar tus votos.")
                 
                 votos_formulario = {}
+                
+                # Desplegar Brackets con el nuevo diseño estético solicitado
                 for idx, fila_p in partidos_fase.iterrows():
                     p_id = fila_p['Partido_ID']
-                    st.markdown(f"##### **Partido {p_id}**")
+                    
+                    # Transformamos texto plano de Sheets a nombres con banderas reales
+                    eq1_con_bandera = obtener_nombre_con_bandera(fila_p['Equipo1'])
+                    eq2_con_bandera = obtener_nombre_con_bandera(fila_p['Equipo2'])
+                    
+                    # Contenedor estético visual por partido
+                    st.markdown(f"""
+                        <div class="match-box">
+                            <div class="match-title">Partido {p_id} ─── {nombre_fase_bonito}</div>
+                            <div style="color: #4B5563; font-size: 14px;">Mano a mano directo:</div>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
                     seleccion_voto = st.radio(
-                        "¿Quién clasifica a la siguiente ronda?",
-                        options=[fila_p['Equipo1'], fila_p['Equipo2']],
-                        key=f"vote_{p_id}"
+                        f"Selecciona al ganador del Partido {p_id}:",
+                        options=[eq1_con_bandera, eq2_con_bandera],
+                        key=f"vote_{p_id}",
+                        label_visibility="collapsed" # Oculta la etiqueta repetitiva para máxima limpieza visual
                     )
-                    votos_formulario[p_id] = seleccion_voto
-                    st.write("---")
+                    
+                    # Guardamos el nombre limpio original para enviarlo de vuelta a Sheets sin emojis
+                    votos_formulario[p_id] = fila_p['Equipo1'] if seleccion_voto == eq1_con_bandera else fila_p['Equipo2']
+                    st.write("") # Espaciador sutil entre llaves
                 
-                if nombre_usuario.strip() and st.button("💾 Enviar Mis Pronósticos"):
+                if nombre_usuario.strip() and st.button("💾 Enviar Mis Pronósticos Oficiales"):
                     try:
                         sh = conectar_google_sheets()
                         ws_votos = sh.worksheet("Eliminatorias_Votos")
@@ -244,7 +295,7 @@ with pestana_registro:
                         ws_votos.append_rows(filas_batch)
                         st.cache_data.clear()
                         st.balloons()
-                        st.success(f"¡Votos para la ronda {fase_actual}vos registrados!")
+                        st.success(f"¡Tus pronósticos para la fase '{nombre_fase_bonito}' fueron registrados!")
                     except Exception as e:
                         st.error("Error al guardar los votos.")
 
@@ -259,7 +310,6 @@ with pestana_leaderboard:
         st.rerun()
 
     try:
-        # CORRECCIÓN AQUÍ: Ahora limpiamos al 100% las respuestas oficiales de grupos de la hoja
         resultados_oficiales_f1 = set([limpiar_texto_equipo(row) for row in oficiales_f1 if row])
         puntuacion_global = {}
 
@@ -268,11 +318,8 @@ with pestana_leaderboard:
             for fila in filas_usuarios:
                 if len(fila) < 2: continue
                 nombre = fila[0].strip()
-                
-                # CORRECCIÓN AQUÍ: Limpiamos las selecciones que guardó el usuario en la app antes de cruzar datos
                 lista_equipos_usuario = set([limpiar_texto_equipo(e) for e in fila[1].split(",")])
                 
-                # Intersección matemática limpia (ej. "mexico" == "mexico")
                 aciertos_f1 = len(lista_equipos_usuario & resultados_oficiales_f1)
                 
                 puntuacion_global[nombre] = {
@@ -281,7 +328,6 @@ with pestana_leaderboard:
                     "Total ⭐": aciertos_f1
                 }
 
-        # Procesar eliminatorias de forma local usando la data precargada
         if partidos_totales:
             dict_ganadores_reales = {
                 p['Partido_ID']: limpiar_texto_equipo(p['Ganador_Oficial']) 
