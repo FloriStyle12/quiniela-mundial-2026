@@ -1,104 +1,227 @@
 import streamlit as st
 import pandas as pd
-import random
-import toml
-import os
 import gspread
+import random
+from google.oauth2.service_account import Credentials
 
-# 1. CONFIGURACIÓN Y ESTILO PRO
-st.set_page_config(page_title="La Quiniela Pro 2026", page_icon="⚽", layout="centered")
-st.markdown("""
-    <style>
-    .big-title { font-size:32px !important; font-weight: bold; color: #1E3A8A; text-align: center; }
-    .subtitle { font-size:16px !important; text-align: center; color: #4B5563; margin-bottom: 20px; }
-    </style>
-""", unsafe_allow_html=True)
+# 1. Configuración de la Página
+st.set_page_config(page_title="Quiniela Mundial 2026", layout="centered")
 
-# 2. CONEXIÓN (Misma de siempre)
+# 2. Conexión Segura a Google Sheets
 @st.cache_resource
-def conectar():
-    ruta = os.path.join(".streamlit", "secrets.toml")
-    conf = toml.load(ruta)["connections"]["gsheets"]
-    creds = {
-        "type": conf["type"], "project_id": conf["project_id"],
-        "private_key_id": conf["private_key_id"],
-        "private_key": conf["private_key"].replace("\\n", "\n"),
-        "client_email": conf["client_email"], "client_id": conf["client_id"],
-        "auth_uri": conf["auth_uri"], "token_uri": conf["token_uri"],
-        "auth_provider_x509_cert_url": conf["auth_provider_x509_cert_url"],
-        "client_x509_cert_url": conf["client_x509_cert_url"]
-    }
-    return gspread.service_account_from_dict(creds).open_by_url(conf["spreadsheet"])
+def conectar_sheets():
+    # Reemplaza esto con la configuración de tus secrets de Streamlit
+    scope = ["https://www.googleapis.com/auth/spreadsheets"]
+    creds = Credentials.from_service_account_info(st.secrets["gspread"], scopes=scope)
+    client = gspread.authorize(creds)
+    # Reemplaza con el nombre exacto de tu archivo de Google Sheets
+    return client.open("Quiniela_Mundial_2026")
 
-# 3. DATOS DE EQUIPOS
-mundial_grupos = {
-    "Grupo A": ["🇲🇽 México", "🇿🇦 Sudáfrica", "🇰🇷 Corea del Sur", "🇨🇿 República Checa"],
-    "Grupo B": ["🇨🇦 Canadá", "🇧🇦 Bosnia y Herzegovina", "🇶🇦 Catar", "🇨🇭 Suiza"],
-    "Grupo C": ["🇧🇷 Brasil", "🇲🇦 Marruecos", "🇭🇹 Haití", "🏴󠁧󠁢󠁳󠁣󠁴󠁿 Escocia"],
-    "Grupo D": ["🇺🇸 Estados Unidos", "🇵🇾 Paraguay", "🇦🇺 Australia", "🇹🇷 Turquía"],
-    "Grupo E": ["🇩🇪 Alemania", "🇨🇼 Curazao", "🇨🇮 Costa de Marfil", "🇪🇨 Ecuador"],
-    "Grupo F": ["🇳🇱 Países Bajos", "🇯🇵 Japón", "🇸🇪 Suecia", "🇹🇳 Túnez"],
-    "Grupo G": ["🇧🇪 Bélgica", "🇪🇬 Egipto", "🇮🇷 Irán", "🇳🇿 Nueva Zelanda"],
-    "Grupo H": ["🇪🇸 España", "🇨🇻 Cabo Verde", "🇸🇦 Arabia Saudita", "🇺🇾 Uruguay"],
-    "Grupo I": ["🇫🇷 Francia", "🇸🇳 Senegal", "🇮🇶 Irak", "🇳🇴 Noruega"],
-    "Grupo J": ["🇦🇷 Argentina", "🇩🇿 Argelia", "🇦🇹 Austria", "🇯🇴 Jordania"],
-    "Grupo K": ["🇵🇹 Portugal", "🇨🇩 RD Congo", "🇺🇿 Uzbekistán", "🇨🇴 Colombia"],
-    "Grupo L": ["🏴󠁧󠁢󠁥󠁮󠁧󠁿 Inglaterra", "🇭🇷 Croacia", "🇬🇭 Ghana", "🇵🇦 Panamá"]
-}
-todos = [eq for grupo in mundial_grupos.values() for eq in grupo]
-
-# 4. LÓGICA DE FASE Y APP
-sh = conectar()
 try:
-    fase_actual = int(sh.worksheet("Fase_Actual").acell('A1').value or 1)
-except: fase_actual = 1
+    spreadsheet = conectar_sheets()
+except Exception as e:
+    st.error("Error al conectar con Google Sheets. Verifica tus credenciales.")
+    st.stop()
 
-st.markdown('<p class="big-title">🏆 QUINIELA MUNDIALISTA 2026</p>', unsafe_allow_html=True)
-pestana1, pestana2 = st.tabs(["📝 Registrar Quiniela", "📊 Tabla de Posiciones"])
+# 3. Base de Datos de Equipos (12 Grupos - 48 Selecciones)
+MUNDIAL_GRUPOS = {
+    "Grupo A": ["Canadá 🇨🇦", "Argelia 🇩🇿", "Corea del Sur 🇰🇷", "Francia 🇫🇷"],
+    "Grupo B": ["México 🇲🇽", "Australia 🇦🇺", "Túnez 🇹🇳", "Alemania 🇩🇪"],
+    "Grupo C": ["Estados Unidos 🇺🇸", "Marruecos 🇲🇦", "Uzbekistán 🇺🇿", "Italia 🇮🇹"],
+    "Grupo D": ["Nueva Zelanda 🇳🇿", "Egipto 🇪🇬", "Irak 🇮🇶", "España 🇪🇸"],
+    "Grupo E": ["Brasil 🇧🇷", "Catar 🇶🇦", "Camerún 🇨🇲", "Portugal 🇵🇹"],
+    "Grupo F": ["Argentina 🇦🇷", "Irán 🇮🇷", "Ghana 🇬🇭", "Inglaterra 🏴󠁧󠁢󠁥󠁮󠁧󠁿"],
+    "Grupo G": ["Uruguay 🇺🇾", "Japón 🇯🇵", "Senegal 🇸🇳", "Bélgica 🇧🇪"],
+    "Grupo H": ["Colombia 🇨🇴", "Arabia Saudita 🇸🇦", "Marruecos 🇲🇦", "Países Bajos 🇳🇱"],
+    "Grupo I": ["Ecuador 🇪🇨", "Emiratos Árabes 🇦🇪", "Nigeria 🇳🇬", "Croacia 🇭🇷"],
+    "Grupo J": ["Perú 🇵🇪", "Omán 🇴🇲", "Costa de Marfil 🇨🇮", "Dinamarca 🇩🇰"],
+    "Grupo L": ["Chile 🇨🇱", "China 🇨🇳", "Sudáfrica 🇿🇦", "Suiza 🇨🇭"],
+    "Grupo M": ["Paraguay 🇵🇾", "Australia 🇦🇺", "Zambia 🇿🇲", "Suencia 🇸🇪"]
+}
 
-with pestana1:
+# Lista plana de todos los equipos
+TODOS_LOS_EQUIPOS = [equipo for grupo in MUNDIAL_GRUPOS.values() for equipo in grupo]
+
+# 4. Leer Estado Actual del Torneo
+sheet_fase = spreadsheet.worksheet("Fase_Actual")
+fase_actual = int(sheet_fase.acell('A1').value)
+
+# Inicializar Session States para Fase 1
+if "picks_fase1" not in st.session_state:
+    st.session_state.picks_fase1 = []
+
+# 5. Menú de Navegación de la App
+opcion = st.sidebar.radio("Navegación", ["📝 Registrar Pronósticos", "📊 Tabla de Posiciones"])
+
+# --- VISTA: REGISTRAR PRONÓSTICOS ---
+if opcion == "📝 Registrar Pronósticos":
+    
     if fase_actual == 1:
-        nombre = st.text_input("👤 Tu nombre completo")
-        for eq in todos:
-            if f"cb_{eq}" not in st.session_state: st.session_state[f"cb_{eq}"] = False
+        st.title("⚽ Fase de Grupos: Elige tus 32 Clasificados")
+        st.write("Selecciona exactamente 32 países de los 12 grupos para avanzar a la ronda eliminatoria.")
         
-        col1, col2 = st.columns(2)
-        if col1.button("🎲 Aleatorio"):
-            for eq in todos: st.session_state[f"cb_{eq}"] = False
-            for eq in random.sample(todos, 32): st.session_state[f"cb_{eq}"] = True
-            st.rerun()
-        if col2.button("🧹 Limpiar"):
-            for eq in todos: st.session_state[f"cb_{eq}"] = False
+        # Botón Aleatorio (Random)
+        if st.button("🎲 Llenado Aleatorio (Random)"):
+            st.session_state.picks_fase1 = random.sample(TODOS_LOS_EQUIPOS, 32)
             st.rerun()
 
-        for grupo, equipos in mundial_grupos.items():
-            with st.expander(grupo):
-                for eq in equipos: st.checkbox(eq, key=f"cb_{eq}")
-        
-        if st.button("🚀 Enviar Registro"):
-            sel = [eq for eq in todos if st.session_state.get(f"cb_{eq}")]
-            if len(sel) == 32:
-                sh.worksheet("Participantes").append_row([nombre, ", ".join(sel)])
-                st.success("¡Registrado!")
-            else: st.error(f"Selecciona 32 equipos. Llevas {len(sel)}")
+        # Contador Visual
+        total_seleccionados = len(st.session_state.picks_fase1)
+        st.metric(label="Equipos Seleccionados", value=f"{total_seleccionados} / 32")
+
+        if total_seleccionados > 32:
+            st.error("Has seleccionado más de 32 equipos. Remueve algunos antes de guardar.")
+
+        # Renderizar los 12 grupos
+        for grupo, equipos in MUNDIAL_GRUPOS.items():
+            with st.expander(f"📂 {grupo}"):
+                for equipo in equipos:
+                    esta_marcado = equipo in st.session_state.picks_fase1
+                    
+                    # Regla de bloqueo si ya hay 32 seleccionados y este no está marcado
+                    debe_bloquearse = total_seleccionados >= 32 and not esta_marcado
+                    
+                    cb = st.checkbox(
+                        equipo, 
+                        value=esta_marcado, 
+                        disabled=debe_bloquearse,
+                        key=f"f1_{equipo}"
+                    )
+                    
+                    # Manejo de clics manuales
+                    if cb and equipo not in st.session_state.picks_fase1:
+                        st.session_state.picks_fase1.append(equipo)
+                        st.rerun()
+                    elif not cb and equipo in st.session_state.picks_fase1:
+                        st.session_state.picks_fase1.remove(equipo)
+                        st.rerun()
+
+        # Formulario de Envío Seguro
+        st.write("---")
+        if total_seleccionados == 32:
+            nombre_usuario = st.text_input("Escribe tu nombre completo para validar tu participación:")
+            if st.button("💾 Enviar Quiniela Oficial"):
+                if nombre_usuario.strip() == "":
+                    st.warning("Por favor, introduce tu nombre antes de guardar.")
+                else:
+                    try:
+                        sheet_usuarios = spreadsheet.worksheet("Fase1_Usuarios")
+                        cadena_picks = ", ".join(st.session_state.picks_fase1)
+                        sheet_usuarios.append_row([nombre_usuario.strip(), cadena_picks])
+                        st.success(f"¡Excelente {nombre_usuario}! Tus 32 selecciones han sido registradas de forma segura.")
+                        st.session_state.picks_fase1 = []
+                    except Exception as e:
+                        st.error(f"Error al conectar con la base de datos: {e}")
+        else:
+            st.info("El botón para guardar aparecerá automáticamente cuando selecciones exactamente 32 equipos.")
+
+    # --- LÓGICA DE FASES ELIMINATORIAS (16vos, 8vos, etc.) ---
     else:
-        st.info(f"Fase {fase_actual}vos en curso. Esperando configuración de brackets.")
-
-with pestana2:
-    if st.button("🔄 Actualizar Tabla"): st.rerun()
-    try:
-        data = sh.worksheet("Participantes").get_all_values()[1:]
+        st.title(f"🏆 Ronda de {fase_actual}vos de Final")
+        st.write("Selecciona al equipo que consideras que ganará cada enfrentamiento directo.")
+        
         try:
-            oficiales = [row[0] for row in sh.worksheet("Resultados_Oficiales").get_all_values()[1:] if row[0]]
-        except: oficiales = []
+            sheet_partidos = spreadsheet.worksheet("Eliminatorias_Partidos")
+            df_partidos = pd.DataFrame(sheet_partidos.get_all_records())
+            
+            # Filtrar solo los partidos cargados manualmente para la fase activa
+            partidos_activos = df_partidos[df_partidos['Fase'] == fase_actual]
+            
+            if partidos_activos.empty:
+                st.info("El Administrador aún no ha cargado los cruces oficiales para esta fase en Google Sheets.")
+            else:
+                nombre_usuario = st.text_input("Introduce tu nombre registrado:")
+                
+                votos_fase = {}
+                for idx, row in partidos_activos.iterrows():
+                    st.write(f"**Partido {row['Partido_ID']}**")
+                    voto = st.radio(
+                        "¿Quién avanza?",
+                        options=[row['Equipo1'], row['Equipo2']],
+                        key=f"el_{row['Partido_ID']}"
+                    )
+                    votos_fase[row['Partido_ID']] = voto
+                    st.write("---")
+                
+                if st.button("💾 Enviar Votos de Eliminatoria"):
+                    if nombre_usuario.strip() == "":
+                        st.warning("Debes introducir tu nombre para guardar tus votos.")
+                    else:
+                        sheet_votos = spreadsheet.worksheet("Eliminatorias_Votos")
+                        filas_a_guardar = []
+                        for part_id, eleccion in votos_fase.items():
+                            filas_a_guardar.append([nombre_usuario.strip(), fase_actual, part_id, eleccion])
+                        
+                        sheet_votos.append_rows(filas_a_guardar)
+                        st.success("Tus pronósticos de eliminación directa han sido guardados exitosamente.")
+        except Exception as e:
+            st.error(f"Error al procesar las fases eliminatorias: {e}")
+
+# --- VISTA: TABLA DE POSICIONES (STANDINGS) ---
+elif opcion == "📊 Tabla de Posiciones":
+    st.title("🏆 Tabla de Posiciones General (Standings)")
+    st.write("Puntaje acumulado en tiempo real a lo largo de todas las fases del mundial.")
+    
+    try:
+        # 1. Procesar puntos de la Fase de Grupos
+        sheet_f1_usuarios = spreadsheet.worksheet("Fase1_Usuarios")
+        usuarios_f1 = sheet_f1_usuarios.get_all_records()
         
-        tabla = []
-        for row in data:
-            if len(row) > 1:
-                aciertos = len(set([p.strip() for p in row[1].split(",")]) & set(oficiales))
-                tabla.append({"Participante": row[0], "Aciertos ⭐": aciertos})
+        sheet_f1_oficiales = spreadsheet.worksheet("Fase1_Oficiales")
+        oficiales_f1 = set([row['Equipos_Clasificados'] for row in sheet_f1_oficiales.get_all_records() if row['Equipos_Clasificados']])
         
-        df = pd.DataFrame(tabla).sort_values(by="Aciertos ⭐", ascending=False).reset_index(drop=True)
-        df.index = df.index + 1
-        st.dataframe(df, use_container_width=True)
-    except Exception as e: st.error("Aún no hay datos para mostrar.")
+        tabla_puntos = {}
+        
+        for u in usuarios_f1:
+            nombre = u['Nombre']
+            picks_usuario = set([p.strip() for p in u['Equipos_32'].split(",") if p.strip()])
+            # Intersección matemática de conjuntos: 1 acierto = 1 punto
+            aciertos_f1 = len(picks_usuario & oficiales_f1)
+            tabla_puntos[nombre] = {"Fase de Grupos": aciertos_f1, "Eliminatorias": 0, "Total": aciertos_f1}
+            
+        # 2. Procesar puntos acumulados de Eliminatorias si existen
+        sheet_partidos = spreadsheet.worksheet("Eliminatorias_Partidos")
+        partidos_oficiales = sheet_partidos.get_all_records()
+        
+        # Mapeo directo de soluciones oficiales: {Partido_ID: Ganador_Oficial}
+        resultados_reales = {p['Partido_ID']: p['Ganador_Oficial'] for p in partidos_oficiales if p['Ganador_Oficial']}
+        
+        sheet_votos = spreadsheet.worksheet("Eliminatorias_Votos")
+        votos_usuarios = sheet_votos.get_all_records()
+        
+        for v in votos_usuarios:
+            nombre = v['Nombre']
+            partido = v['Partido_ID']
+            voto = v['Voto_Usuario']
+            
+            # Si el usuario existe en el registro y el partido ya tiene un ganador oficial resuelto
+            if nombre in tabla_puntos and partido in resultados_reales:
+                if voto == resultados_reales[partido]:
+                    # Sumamos 1 punto por acierto en eliminatoria directo al acumulado
+                    tabla_puntos[nombre]["Eliminatorias"] += 1
+                    tabla_puntos[nombre]["Total"] += 1
+                    
+        # Convertir datos procesados en DataFrame para visualización profesional
+        if tabla_puntos:
+            data_ranking = []
+            for nombre, datos in tabla_puntos.items():
+                data_ranking.append({
+                    "Participante": nombre,
+                    "Pts Grupos ⚽": datos["Fase de Grupos"],
+                    "Pts Eliminatorias 🏆": datos["Eliminatorias"],
+                    "Puntaje Total ⭐": datos["Total"]
+                })
+                
+            df_ranking = pd.DataFrame(data_ranking).sort_values(by="Puntaje Total ⭐", ascending=False)
+            
+            # Estilizar tabla limpia
+            st.dataframe(
+                df_ranking, 
+                use_container_width=True, 
+                hide_index=True
+            )
+        else:
+            st.info("Aún no se registran participantes en la base de datos.")
+            
+    except Exception as e:
+        st.error(f"Error al compilar la tabla de standings: {e}")
