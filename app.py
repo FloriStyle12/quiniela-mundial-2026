@@ -33,10 +33,10 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<p class="big-title">🏆 QUINIELA MUNDIAL PRRONA 2026</p>', unsafe_allow_html=True)
-st.markdown('<p class="subtitle">Que la fuerza los acompañe.</p>', unsafe_allow_html=True)
+st.markdown('<p class="big-title">🏆 QUINIELA MUNDIALISTA PRRONA 2026</p>', unsafe_allow_html=True)
+st.markdown('<p class="subtitle">Que La Fuerza Los Acompañe.</p>', unsafe_allow_html=True)
 
-# DICCIONARIO MAESTRO DE BANDERAS (Para transformar texto plano de Sheets a visual estético)
+# DICCIONARIO MAESTRO DE BANDERAS
 DICCIONARIO_BANDERAS = {
     "mexico": "🇲🇽", "sudafrica": "🇿🇦", "corea del sur": "🇰🇷", "republica checa": "🇨🇿",
     "canada": "🇨🇦", "bosnia y herzegovina": "🇧🇦", "catar": "🇶🇦", "suiza": "🇨🇭",
@@ -78,8 +78,7 @@ def limpiar_texto_equipo(texto):
 # FUNCIÓN AUXILIAR: Devuelve el nombre del equipo con su bandera si existe
 def obtener_nombre_con_bandera(nombre_plano):
     nombre_limpio = limpiar_texto_equipo(nombre_plano)
-    bandera = DICCIONARIO_BANDERAS.get(nombre_limpio, "🏳️") # Bandera blanca si no se encuentra
-    # Formatea Capitalizado (Ej: "mexico" -> "México")
+    bandera = DICCIONARIO_BANDERAS.get(nombre_limpio, "🏳️")
     nombre_formateado = str(nombre_plano).strip().title()
     return f"{bandera} {nombre_formateado}"
 
@@ -87,7 +86,7 @@ def obtener_nombre_con_bandera(nombre_plano):
 def conectar_google_sheets():
     ruta_secretos = os.path.join(".streamlit", "secrets.toml")
     secretos_dict = toml.load(ruta_secretos)
-    gsheets_conf = secretos_dict["connections"]["gsheets"]
+    gsheets_conf = secrets_dict["connections"]["gsheets"]
     
     credenciales = {
         "type": gsheets_conf["type"],
@@ -109,12 +108,11 @@ def conectar_google_sheets():
 def cargar_datos_sheets():
     sh = conectar_google_sheets()
     
-    # Leer Fase Actual
     try:
         ws_fase = sh.worksheet("Fase_Actual")
         fase = int(ws_fase.acell('A1').value)
     except:
-        fase = 32 # Default a fase de grupos si falla
+        fase = 32
         
     ws_participantes = sh.get_worksheet(0)
     datos_p = ws_participantes.get_all_values()
@@ -169,135 +167,161 @@ todos_los_equipos = [equipo for grupo in mundial_grupos.values() for equipo in g
 # ==========================================
 with pestana_registro:
     nombre_usuario = st.text_input("👤 Escribe tu nombre completo:", placeholder="Ej. Víctor Rodríguez", key="user_name")
+    
+    if nombre_usuario.strip():
+        st.info("⚠️ **¡Atención!** Recuerda escribir tu nombre **exactamente igual** en todas las fases del mundial para que tus puntos acumulados se sumen de forma correcta.")
     st.write("---")
 
-    # MODO: FASE DE GRUPOS (Código 32)
-    if fase_actual == 32:
-        st.subheader(f"{MAPEO_FASES.get(fase_actual, 'Fase de Grupos')}: Tus 32 Clasificados")
-        
-        for eq in todos_los_equipos:
-            clave_eq = f"cb_{eq}"
-            if clave_eq not in st.session_state:
-                st.session_state[clave_eq] = False
+    nombre_fase_bonito = MAPEO_FASES.get(fase_actual, f"Fase {fase_actual}")
 
-        st.sidebar.header("⚙️ Panel de Control")
-        if st.sidebar.button("🎲 Llenar 32 Equipos (Random)"):
-            for eq in todos_los_equipos:
-                st.session_state[f"cb_{eq}"] = False
-            equipos_azar = random.sample(todos_los_equipos, 32)
-            for eq in equipos_azar:
-                st.session_state[f"cb_{eq}"] = True
-            st.rerun()
+    # --- LÓGICA DE CONTROL: CANDADO AUTOMÁTICO ---
+    ya_voto_en_esta_fase = False
+    nombre_usuario_limpio = nombre_usuario.strip().lower()
 
-        if st.sidebar.button("🧹 Limpiar Selección"):
-            for eq in todos_los_equipos:
-                st.session_state[f"cb_{eq}"] = False
-            st.rerun()
-
-        equipos_seleccionados = [eq for eq in todos_los_equipos if st.session_state[f"cb_{eq}"]]
-        total_seleccionados = len(equipos_seleccionados)
-
-        sub_tabs = st.tabs(["📌 Grupos A - D", "📌 Grupos E - H", "📌 Grupos I - L"])
-
-        def dibujar_grupo(nombre_grupo):
-            st.markdown(f"#### 📅 {nombre_grupo}")
-            equipos = mundial_grupos[nombre_grupo]
-            cols = st.columns(2)
-            for idx, equipo in enumerate(equipos):
-                col_actual = cols[idx % 2]
-                clave_checkbox = f"cb_{equipo}"
-                esta_encendido = st.session_state[clave_checkbox]
-                debe_bloquearse = total_seleccionados >= 32 and not esta_encendido
-                col_actual.checkbox(equipo, key=clave_checkbox, disabled=debe_bloquearse)
-
-        with sub_tabs[0]:
-            dibujar_grupo("Grupo A"); dibujar_grupo("Grupo B"); dibujar_grupo("Grupo C"); dibujar_grupo("Grupo D")
-        with sub_tabs[1]:
-            dibujar_grupo("Grupo E"); dibujar_grupo("Grupo F"); dibujar_grupo("Grupo G"); dibujar_grupo("Grupo H")
-        with sub_tabs[2]:
-            dibujar_grupo("Grupo I"); dibujar_grupo("Grupo J"); dibujar_grupo("Grupo K"); dibujar_grupo("Grupo L")
-
-        st.write("---")
-        st.metric(label="Seleccionados", value=f"{total_seleccionados} / 32")
-
-        if not nombre_usuario.strip():
-            st.info("💡 Por favor, ingresa tu nombre en la parte superior para habilitar el envío.")
-        elif total_seleccionados == 32:
-            st.success(f"¡Listo, {nombre_usuario}! Has seleccionado exactamente 32 equipos.")
-            if st.button("🚀 Enviar mi Quiniela Oficial"):
-                try:
-                    sh = conectar_google_sheets()
-                    ws_registro = sh.get_worksheet(0)
-                    equipos_texto = ", ".join(sorted(equipos_seleccionados))
-                    ws_registro.append_row([nombre_usuario.strip(), equipos_texto])
-                    st.cache_data.clear()
-                    st.balloons()
-                    st.success("¡Tu quiniela de grupos ha sido registrada con éxito! 🏆")
-                except Exception as e:
-                    st.error("Error de escritura en el servidor.")
+    if nombre_usuario.strip():
+        if fase_actual == 32:
+            # Validar en la pestaña principal de Grupos
+            if len(datos_p) > 1:
+                for fila in datos_p[1:]:
+                    if fila and fila[0].strip().lower() == nombre_usuario_limpio:
+                        ya_voto_en_esta_fase = True
+                        break
         else:
-            st.warning(f"Asegúrate de completar tu selección. Llevas {total_seleccionados} de 32 equipos.")
+            # Validar en la pestaña de Votos de Eliminatorias
+            for v in votos_totales:
+                if str(v.get('Nombre', '')).strip().lower() == nombre_usuario_limpio and int(v.get('Fase', 0)) == fase_actual:
+                    ya_voto_en_esta_fase = True
+                    break
 
-    # MODO: BRACKETS ELIMINATORIOS (Códigos 16, 8, 4, 2, 1)
+    # SI YA TIENE UN REGISTRO, SE ACTIVA EL CANDADO AUTOMÁTICO
+    if ya_voto_en_esta_fase:
+        st.warning(f"🔒 **¡Hola, {nombre_usuario.strip()}!** El sistema detecta que ya registraste tus predicciones oficiales para la **{nombre_fase_bonito}**. No se permiten modificaciones.")
+        st.info("💡 Si consideras que se trata de un error, por favor ponte en contacto directo con el Comisionado del torneo.")
+    
+    # SI NO HA VOTADO, SE DESPLIEGA EL FORMULARIO NORMALMENTE
     else:
-        nombre_fase_bonito = MAPEO_FASES.get(fase_actual, f"Fase {fase_actual}")
-        st.subheader(f"{nombre_fase_bonito}")
-        st.write("Selecciona al equipo que ganará en cada partido directo para avanzar de ronda.")
-        
-        df_partidos = pd.DataFrame(partidos_totales)
-        if df_partidos.empty:
-            st.info("El Comisionado aún no ha estructurado los partidos en Sheets.")
-        else:
-            partidos_fase = df_partidos[df_partidos['Fase'] == fase_actual]
-            if partidos_fase.empty:
-                st.info(f"No hay partidos cargados en la hoja de cálculo para la {nombre_fase_bonito}.")
-            else:
-                if not nombre_usuario.strip():
-                    st.info("💡 Coloca tu nombre arriba para poder registrar tus votos.")
-                
-                votos_formulario = {}
-                
-                # Desplegar Brackets con el nuevo diseño estético solicitado
-                for idx, fila_p in partidos_fase.iterrows():
-                    p_id = fila_p['Partido_ID']
-                    
-                    # Transformamos texto plano de Sheets a nombres con banderas reales
-                    eq1_con_bandera = obtener_nombre_con_bandera(fila_p['Equipo1'])
-                    eq2_con_bandera = obtener_nombre_con_bandera(fila_p['Equipo2'])
-                    
-                    # Contenedor estético visual por partido
-                    st.markdown(f"""
-                        <div class="match-box">
-                            <div class="match-title">Partido {p_id} ─── {nombre_fase_bonito}</div>
-                            <div style="color: #4B5563; font-size: 14px;">Mano a mano directo:</div>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    
-                    seleccion_voto = st.radio(
-                        f"Selecciona al ganador del Partido {p_id}:",
-                        options=[eq1_con_bandera, eq2_con_bandera],
-                        key=f"vote_{p_id}",
-                        label_visibility="collapsed" # Oculta la etiqueta repetitiva para máxima limpieza visual
-                    )
-                    
-                    # Guardamos el nombre limpio original para enviarlo de vuelta a Sheets sin emojis
-                    votos_formulario[p_id] = fila_p['Equipo1'] if seleccion_voto == eq1_con_bandera else fila_p['Equipo2']
-                    st.write("") # Espaciador sutil entre llaves
-                
-                if nombre_usuario.strip() and st.button("💾 Enviar Mis Pronósticos Oficiales"):
+        # MODO: FASE DE GRUPOS (Código 32)
+        if fase_actual == 32:
+            st.subheader(f"{nombre_fase_bonito}: Tus 32 Clasificados")
+            
+            for eq in todos_los_equipos:
+                clave_eq = f"cb_{eq}"
+                if clave_eq not in st.session_state:
+                    st.session_state[clave_eq] = False
+
+            st.sidebar.header("⚙️ Panel de Control")
+            if st.sidebar.button("🎲 Llenar 32 Equipos (Random)"):
+                for eq in todos_los_equipos:
+                    st.session_state[f"cb_{eq}"] = False
+                equipos_azar = random.sample(todos_los_equipos, 32)
+                for eq in equipos_azar:
+                    st.session_state[f"cb_{eq}"] = True
+                st.rerun()
+
+            if st.sidebar.button("🧹 Limpiar Selección"):
+                for eq in todos_los_equipos:
+                    st.session_state[f"cb_{eq}"] = False
+                st.rerun()
+
+            equipos_seleccionados = [eq for eq in todos_los_equipos if st.session_state[f"cb_{eq}"]]
+            total_seleccionados = len(equipos_seleccionados)
+
+            sub_tabs = st.tabs(["📌 Grupos A - D", "📌 Grupos E - H", "📌 Grupos I - L"])
+
+            def dibujar_grupo(nombre_grupo):
+                st.markdown(f"#### 📅 {nombre_grupo}")
+                equipos = mundial_grupos[nombre_grupo]
+                cols = st.columns(2)
+                for idx, equipo in enumerate(equipos):
+                    col_actual = cols[idx % 2]
+                    clave_checkbox = f"cb_{equipo}"
+                    esta_encendido = st.session_state[clave_checkbox]
+                    debe_bloquearse = total_seleccionados >= 32 and not esta_encendido
+                    col_actual.checkbox(equipo, key=clave_checkbox, disabled=debe_bloquearse)
+
+            with sub_tabs[0]:
+                dibujar_grupo("Grupo A"); dibujar_grupo("Grupo B"); dibujar_grupo("Grupo C"); dibujar_grupo("Grupo D")
+            with sub_tabs[1]:
+                dibujar_grupo("Grupo E"); dibujar_grupo("Grupo F"); dibujar_grupo("Grupo G"); dibujar_grupo("Grupo H")
+            with sub_tabs[2]:
+                dibujar_grupo("Grupo I"); dibujar_grupo("Grupo J"); dibujar_grupo("Grupo K"); dibujar_grupo("Grupo L")
+
+            st.write("---")
+            st.metric(label="Seleccionados", value=f"{total_seleccionados} / 32")
+
+            if not nombre_usuario.strip():
+                st.info("💡 Por favor, ingresa tu nombre en la parte superior para habilitar el envío.")
+            elif total_seleccionados == 32:
+                st.success(f"¡Listo, {nombre_usuario}! Has seleccionado exactamente 32 equipos.")
+                if st.button("🚀 Enviar mi Quiniela Oficial"):
                     try:
                         sh = conectar_google_sheets()
-                        ws_votos = sh.worksheet("Eliminatorias_Votos")
-                        filas_batch = []
-                        for part_id, equipo_votado in votos_formulario.items():
-                            filas_batch.append([nombre_usuario.strip(), fase_actual, part_id, equipo_votado])
-                        
-                        ws_votos.append_rows(filas_batch)
+                        ws_registro = sh.get_worksheet(0)
+                        equipos_texto = ", ".join(sorted(equipos_seleccionados))
+                        ws_registro.append_row([nombre_usuario.strip(), equipos_texto])
                         st.cache_data.clear()
                         st.balloons()
-                        st.success(f"¡Tus pronósticos para la fase '{nombre_fase_bonito}' fueron registrados!")
+                        st.success("¡Tu quiniela de grupos ha sido registrada con éxito! 🏆")
+                        st.rerun()
                     except Exception as e:
-                        st.error("Error al guardar los votos.")
+                        st.error("Error de escritura en el servidor.")
+            else:
+                st.warning(f"Asegúrate de completar tu selección. Llevas {total_seleccionados} de 32 equipos.")
+
+        # MODO: BRACKETS ELIMINATORIOS (Códigos 16, 8, 4, 2, 1)
+        else:
+            st.subheader(f"{nombre_fase_bonito}")
+            st.write("Selecciona al equipo que ganará en cada partido directo para avanzar de ronda.")
+            
+            df_partidos = pd.DataFrame(partidos_totales)
+            if df_partidos.empty:
+                st.info("El Comisionado aún no ha estructurado los partidos en Sheets.")
+            else:
+                partidos_fase = df_partidos[df_partidos['Fase'] == fase_actual]
+                if partidos_fase.empty:
+                    st.info(f"No hay partidos cargados en la hoja de cálculo para la {nombre_fase_bonito}.")
+                else:
+                    if not nombre_usuario.strip():
+                        st.info("💡 Coloca tu nombre arriba para poder registrar tus votos.")
+                    
+                    votos_formulario = {}
+                    
+                    for idx, fila_p in partidos_fase.iterrows():
+                        p_id = fila_p['Partido_ID']
+                        eq1_con_bandera = obtener_nombre_con_bandera(fila_p['Equipo1'])
+                        eq2_con_bandera = obtener_nombre_con_bandera(fila_p['Equipo2'])
+                        
+                        st.markdown(f"""
+                            <div class="match-box">
+                                <div class="match-title">Partido {p_id} ─── {nombre_fase_bonito}</div>
+                                <div style="color: #4B5563; font-size: 14px;">Mano a mano directo:</div>
+                            </div>
+                        """, unsafe_allow_html=True)
+                        
+                        seleccion_voto = st.radio(
+                            f"Selecciona al ganador del Partido {p_id}:",
+                            options=[eq1_con_bandera, eq2_con_bandera],
+                            key=f"vote_{p_id}",
+                            label_visibility="collapsed"
+                        )
+                        votos_formulario[p_id] = fila_p['Equipo1'] if seleccion_voto == eq1_con_bandera else fila_p['Equipo2']
+                        st.write("")
+                    
+                    if nombre_usuario.strip() and st.button("💾 Enviar Mis Pronósticos Oficiales"):
+                        try:
+                            sh = conectar_google_sheets()
+                            ws_votos = sh.worksheet("Eliminatorias_Votos")
+                            filas_batch = []
+                            for part_id, equipo_votado in votos_formulario.items():
+                                filas_batch.append([nombre_usuario.strip(), fase_actual, part_id, equipo_votado])
+                            
+                            ws_votos.append_rows(filas_batch)
+                            st.cache_data.clear()
+                            st.balloons()
+                            st.success(f"¡Tus pronósticos para la fase '{nombre_fase_bonito}' fueron registrados!")
+                            st.rerun()
+                        except Exception as e:
+                            st.error("Error al guardar los votos.")
 
 # ==========================================
 # SECCIÓN 2: LEADERBOARD (TABLA DE POSICIONES)
