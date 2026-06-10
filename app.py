@@ -24,7 +24,8 @@ st.markdown('<p class="big-title">🏆 LA QUINIELA MUNDIALISTA 2026</p>', unsafe
 st.markdown('<p class="subtitle">Plataforma oficial de predicciones y resultados en tiempo real.</p>', unsafe_allow_html=True)
 
 # 2. CONEXIÓN CENTRALIZADA A GOOGLE SHEETS
-def conectar_google_sheets():
+@st.cache_resource
+def iniciar_cliente_google():
     ruta_secretos = os.path.join(".streamlit", "secrets.toml")
     secretos_dict = toml.load(ruta_secretos)
     gsheets_conf = secretos_dict["connections"]["gsheets"]
@@ -41,10 +42,42 @@ def conectar_google_sheets():
         "auth_provider_x509_cert_url": gsheets_conf["auth_provider_x509_cert_url"],
         "client_x509_cert_url": gsheets_conf["client_x509_cert_url"]
     }
-    gc = gspread.service_account_from_dict(credenciales)
-    return gc.open_by_url(gsheets_conf["spreadsheet"])
+    return gspread.service_account_from_dict(credenciales), gsheets_conf["spreadsheet"]
 
-# 3. MENÚ PRINCIPAL (Pestañas de la App)
+# 3. FUNCIONES DE LECTURA OPTIMIZADAS CON CACHÉ (Evita el Error 429)
+@st.cache_data(ttl=60) # Guarda los datos en memoria por 60 segundos antes de volver a molestar a Google
+def cargar_datos_quiniela():
+    gc, url_hoja = iniciar_cliente_google()
+    sh = gc.open_by_url(url_hoja)
+    
+    # Leer Participantes
+    ws_p = sh.get_worksheet(0)
+    datos_p = ws_p.get_all_values()
+    
+    # Leer Resultados Oficiales
+    try:
+        ws_oficial = sh.worksheet("Resultados_Oficiales")
+        res_oficiales_grupos = ws_oficial.col_values(1)[1:]
+    except Exception:
+        res_oficiales_grupos = []
+        
+    # Leer Partidos de Eliminatoria
+    try:
+        ws_partidos = sh.worksheet("Partidos_Eliminatoria")
+        lista_partidos = ws_partidos.get_all_records()
+    except Exception:
+        lista_partidos = []
+        
+    # Leer Respuestas de Eliminatoria
+    try:
+        ws_resp_elim = sh.worksheet("Respuestas_Eliminatoria")
+        datos_elim = ws_resp_elim.get_all_values()[1:]
+    except Exception:
+        datos_elim = []
+        
+    return datos_p, res_oficiales_grupos, lista_partidos, datos_elim
+
+# 4. MENÚ PRINCIPAL (Pestañas de la App)
 p_registro, p_eliminatoria, p_leaderboard = st.tabs(["📝 Fase de Grupos", "⚔️ Rondas Eliminatorias", "📊 Tabla de Posiciones"])
 
 mundial_grupos = {
@@ -99,9 +132,11 @@ with p_registro:
     elif total_seleccionados == 32:
         if st.button("🚀 Enviar Predicción Grupos"):
             try:
-                sh = conectar_google_sheets()
+                gc, url_hoja = iniciar_cliente_google()
+                sh = gc.open_by_url(url_hoja)
                 ws = sh.get_worksheet(0)
                 ws.append_row([nombre_usuario.strip(), ", ".join(sorted(equipos_seleccionados))])
+                st.cache_data.clear() # Limpiamos caché para forzar actualización al enviar
                 st.balloons()
                 st.success("¡Fase de grupos registrada! 🏆")
             except Exception as e: st.error(f"Error: {e}")
@@ -116,134 +151,106 @@ with p_eliminatoria:
     nombre_elim = st.text_input("👤 Confirma tu nombre completo:", placeholder="Debe ser idéntico al que registraste", key="user_name_elim")
     st.write("---")
     
-    try:
-        sh = conectar_google_sheets()
-        # Intentamos leer la pestaña de los duelos directos
-        try:
-            ws_partidos = sh.worksheet("Partidos_Eliminatoria")
-            lista_partidos = ws_partidos.get_all_records()
-        except Exception:
-            lista_partidos = []
-            st.warning("⚠️ El administrador aún no ha dado de alta partidos en 'Partidos_Eliminatoria'.")
+    # Cargamos datos usando el sistema blindado de caché
+    datos_p, res_oficiales_grupos, lista_partidos, datos_elim = cargar_datos_quiniela()
 
-        if len(lista_partidos) == 0:
-            st.info("No hay partidos disponibles para pronosticar en este momento.")
-        else:
-            pronosticos_usuario = {}
-            # Pintamos de forma dinámica cada partido que el admin puso en Sheets
-            for partido in lista_partidos:
-                id_p = str(partido["ID_Partido"])
-                eq1 = partido["Equipo_1"]
-                eq2 = partido["Equipo_2"]
-                
-                st.markdown(f"##### 📑 Partido #{id_p}")
-                # Radio button para elegir al ganador en el cel
-                seleccion = st.radio(
-                    f"¿Quién avanza a la siguiente ronda?",
-                    options=[eq1, eq2],
-                    index=None,
-                    key=f"partido_{id_p}"
-                )
-                pronosticos_usuario[id_p] = seleccion
-                st.write("")
+    if len(lista_partidos) == 0:
+        st.info("No hay partidos disponibles para pronosticar en este momento.")
+    else:
+        pronosticos_usuario = {}
+        for partido in lista_partidos:
+            id_p = str(partido["ID_Partido"])
+            eq1 = partido["Equipo_1"]
+            eq2 = partido["Equipo_2"]
+            
+            st.markdown(f"##### 📑 Partido #{id_p}")
+            seleccion = st.radio(f"¿Quién avanza?", options=[eq1, eq2], index=None, key=f"partido_{id_p}")
+            pronosticos_usuario[id_p] = seleccion
+            st.write("")
 
-            if st.button("💾 Guardar mis Pronósticos de Eliminatoria"):
-                if not nombre_elim.strip():
-                    st.error("Por favor ingresa tu nombre para guardar.")
-                elif None in pronosticos_usuario.values():
-                    st.warning("Asegúrate de responder todos los partidos que están en pantalla.")
-                else:
-                    # Guardamos las respuestas en una nueva pestaña oculta para el procesamiento
-                    try:
-                        try: ws_resp = sh.worksheet("Respuestas_Eliminatoria")
-                        except Exception: ws_resp = sh.add_worksheet(title="Respuestas_Eliminatoria", rows="100", cols="20")
-                        
-                        if len(ws_resp.get_all_values()) == 0:
-                            ws_resp.append_row(["Participante", "Partido_ID", "Prediccion"])
-                        
-                        # Borramos registros viejos de este usuario si ya existían para que pueda actualizar
-                        celdas = ws_resp.findall(nombre_elim.strip())
-                        for celda in reversed(celdas):
-                            if celda.col == 1: ws_resp.delete_rows(celda.row)
-                        
-                        # Guardamos los nuevos pronósticos uno por uno
-                        for id_p, pred in pronosticos_usuario.items():
-                            ws_resp.append_row([nombre_elim.strip(), id_p, pred])
-                        
-                        st.balloons()
-                        st.success("¡Tus duelos directos se guardaron correctamente!")
-                    except Exception as e: st.error(f"Error al guardar: {e}")
-    except Exception as e: st.error(f"Error de conexión: {e}")
+        if st.button("💾 Guardar mis Pronósticos de Eliminatoria"):
+            if not nombre_elim.strip():
+                st.error("Por favor ingresa tu nombre para guardar.")
+            elif None in pronosticos_usuario.values():
+                st.warning("Asegúrate de responder todos los partidos que están en pantalla.")
+            else:
+                try:
+                    gc, url_hoja = iniciar_cliente_google()
+                    sh = gc.open_by_url(url_hoja)
+                    try: ws_resp = sh.worksheet("Respuestas_Eliminatoria")
+                    except Exception: ws_resp = sh.add_worksheet(title="Respuestas_Eliminatoria", rows="100", cols="20")
+                    
+                    if len(ws_resp.get_all_values()) == 0:
+                        ws_resp.append_row(["Participante", "Partido_ID", "Prediccion"])
+                    
+                    celdas = ws_resp.findall(nombre_elim.strip())
+                    for celda in reversed(celdas):
+                        if celda.col == 1: ws_resp.delete_rows(celda.row)
+                    
+                    for id_p, pred in pronosticos_usuario.items():
+                        ws_resp.append_row([nombre_elim.strip(), id_p, pred])
+                    
+                    st.cache_data.clear() # Limpiamos la caché
+                    st.balloons()
+                    st.success("¡Tus duelos directos se guardaron correctamente!")
+                except Exception as e: st.error(f"Error al guardar: {e}")
 
 # ==========================================
 # SECCIÓN 3: LEADERBOARD (TABLA DE POSICIONES)
 # ==========================================
 with p_leaderboard:
-    st.markdown("### 📊 Clasificación General (1 Punto por Acierto)")
-    if st.button("🔄 Actualizar Tabla"): st.rerun()
+    st.markdown("### 📊 Clasificación General")
+    
+    # Botón pro para forzar actualización manual si el usuario quiere saltarse la caché
+    if st.button("🔄 Sincronizar y Actualizar con Google"): 
+        st.cache_data.clear()
+        st.rerun()
 
-    try:
-        sh = conectar_google_sheets()
+    # Cargamos datos optimizados
+    datos_p, res_oficiales_grupos, lista_partidos, datos_elim = cargar_datos_quiniela()
+
+    # Creamos diccionario de partidos reales ganados
+    dict_partidos = {str(p["ID_Partido"]): p["Ganador_Real"] for p in lista_partidos if str(p.get("Ganador_Real", "")).strip()}
+
+    if len(datos_p) <= 1:
+        st.info("Aún no hay participantes registrados.")
+    else:
+        filas_usuarios = datos_p[1:] if "nombre" in datos_p[0][0].lower() else datos_p
+        puntuaciones = {}
+
+        # Calculamos puntos de grupos
+        for fila in filas_usuarios:
+            if len(fila) < 2: continue
+            nombre = fila[0].strip()
+            equipos = [e.strip() for e in fila[1].split(",")]
+            aciertos_g = sum(1 for eq in equipos if eq in res_oficiales_grupos)
+            puntuaciones[nombre] = {"Grupos": aciertos_g, "Eliminatoria": 0}
+
+        # Calculamos puntos de eliminatorias
+        for row in datos_elim:
+            if len(row) < 3: continue
+            user = row[0].strip()
+            id_partido = str(row[1])
+            prediccion = row[2].strip()
+            
+            if id_partido in dict_partidos and dict_partidos[id_partido] == prediccion:
+                if user in puntuaciones:
+                    puntuaciones[user]["Eliminatoria"] += 1
+
+        # Armamos el ranking sumando todo
+        lista_ranking = []
+        for user, pts in puntuaciones.items():
+            total = pts["Grupos"] + pts["Eliminatoria"]
+            lista_ranking.append({
+                "Participante": user, 
+                "Pts Grupos ⚽": pts["Grupos"], 
+                "Pts Eliminatoria ⚔️": pts["Eliminatoria"], 
+                "TOTAL ⭐": total
+            })
+
+        df = pd.DataFrame(lista_ranking).sort_values(by="TOTAL ⭐", ascending=False).reset_index(drop=True)
+        df.index = df.index + 1
+        st.dataframe(df, use_container_width=True)
         
-        # 1. Puntos de Fase de Grupos
-        ws_p = sh.get_worksheet(0)
-        datos_p = ws_p.get_all_values()
-        try:
-            ws_oficial = sh.worksheet("Resultados_Oficiales")
-            res_oficiales_grupos = ws_oficial.col_values(1)[1:]
-        except Exception: res_oficiales_grupos = []
-
-        # 2. Puntos de Eliminatoria Directa
-        try:
-            ws_partidos = sh.worksheet("Partidos_Eliminatoria")
-            dict_partidos = {str(p["ID_Partido"]): p["Ganador_Real"] for p in ws_partidos.get_all_records() if p["Ganador_Real"]}
-            
-            ws_resp_elim = sh.worksheet("Respuestas_Eliminatoria")
-            datos_elim = ws_resp_elim.get_all_values()[1:]
-        except Exception:
-            dict_partidos = {}
-            datos_elim = []
-
-        if len(datos_p) <= 1:
-            st.info("Aún no hay participantes registrados.")
-        else:
-            filas_usuarios = datos_p[1:] if "nombre" in datos_p[0][0].lower() else datos_p
-            puntuaciones = {}
-
-            # Calculamos puntos de grupos
-            for fila in filas_usuarios:
-                if len(fila) < 2: continue
-                nombre = fila[0].strip()
-                equipos = [e.strip() for e in fila[1].split(",")]
-                aciertos_g = sum(1 for eq in equipos if eq in res_oficiales_grupos)
-                puntuaciones[nombre] = {"Grupos": aciertos_g, "Eliminatoria": 0}
-
-            # Calculamos puntos de eliminatorias
-            for row in datos_elim:
-                if len(row) < 3: continue
-                user = row[0].strip()
-                id_partido = str(row[1])
-                prediccion = row[2].strip()
-                
-                if id_partido in dict_partidos and dict_partidos[id_partido] == prediccion:
-                    if user in puntuaciones:
-                        puntuaciones[user]["Eliminatoria"] += 1
-
-            # Armamos el ranking sumando todo
-            lista_ranking = []
-            for user, pts in puntuaciones.items():
-                total = pts["Grupos"] + pts["Eliminatoria"]
-                lista_ranking.append({
-                    "Participante": user, 
-                    "Pts Grupos ⚽": pts["Grupos"], 
-                    "Pts Eliminatoria ⚔️": pts["Eliminatoria"], 
-                    "TOTAL ⭐": total
-                })
-
-            df = pd.DataFrame(lista_ranking).sort_values(by="TOTAL ⭐", ascending=False).reset_index(drop=True)
-            df.index = df.index + 1
-            st.dataframe(df, use_container_width=True)
-            
-            if len(df) > 0:
-                st.success(f"🔥 ¡**{df.iloc[0]['Participante']}** va a la cabeza de la competencia!")
-    except Exception as e: st.code(e)
+        if len(df) > 0:
+            st.success(f"🔥 ¡**{df.iloc[0]['Participante']}** va a la cabeza de la competencia!")
