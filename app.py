@@ -86,7 +86,7 @@ def obtener_nombre_con_bandera(nombre_plano):
 def conectar_google_sheets():
     ruta_secretos = os.path.join(".streamlit", "secrets.toml")
     secretos_dict = toml.load(ruta_secretos)
-    gsheets_conf = secrets_dict["connections"]["gsheets"]
+    gsheets_conf = secretos_dict["connections"]["gsheets"]
     
     credenciales = {
         "type": gsheets_conf["type"],
@@ -114,8 +114,13 @@ def cargar_datos_sheets():
     except:
         fase = 32
         
-    ws_participantes = sh.get_worksheet(0)
-    datos_p = ws_participantes.get_all_values()
+    try:
+        ws_participantes = sh.worksheet("Participantes")
+        datos_p = ws_participantes.get_all_values()
+    except:
+        # Intenta jalar la primera por posición si la renombraron mal
+        ws_participantes = sh.get_worksheet(0)
+        datos_p = ws_participantes.get_all_values()
     
     try:
         ws_oficial = sh.worksheet("Resultados_Oficiales")
@@ -140,7 +145,7 @@ def cargar_datos_sheets():
 try:
     fase_actual, datos_p, oficiales_f1, partidos_totales, votos_totales = cargar_datos_sheets()
 except Exception as e:
-    st.error("Error al obtener los datos de Google Sheets.")
+    st.error(f"Error al obtener los datos de Google Sheets. Detalles técnicos para solución rápida: {e}")
     st.stop()
 
 # 3. MENÚ PRINCIPAL
@@ -160,6 +165,7 @@ mundial_grupos = {
     "Grupo K": ["🇵🇹 Portugal", "🇨🇩 RD Congo", "🇺🇿 Uzbekistán", "🇨🇴 Colombia"],
     "Grupo L": ["🏴󠁧󠁢󠁥󠁮󠁧󠁿 Inglaterra", "🇭🇷 Croacia", "🇬🇭 Ghana", "🇵🇦 Panamá"]
 }
+todos_los_equipos = [equipo for grupo in mundial_grupos.values() for equipo in group] if 'group' not in locals() else [equipo for grupo in mundial_grupos.values() for equipo in grupo]
 todos_los_equipos = [equipo for grupo in mundial_grupos.values() for equipo in grupo]
 
 # ==========================================
@@ -174,22 +180,26 @@ with pestana_registro:
 
     nombre_fase_bonito = MAPEO_FASES.get(fase_actual, f"Fase {fase_actual}")
 
-    # --- LÓGICA DE CONTROL: CANDADO AUTOMÁTICO ---
+    # --- LÓGICA DE CONTROL: CANDADO AUTOMÁTICO PROTEGIDO ---
     ya_voto_en_esta_fase = False
     nombre_usuario_limpio = nombre_usuario.strip().lower()
 
     if nombre_usuario.strip():
         if fase_actual == 32:
-            # Validar en la pestaña principal de Grupos
             if len(datos_p) > 1:
                 for fila in datos_p[1:]:
                     if fila and fila[0].strip().lower() == nombre_usuario_limpio:
                         ya_voto_en_esta_fase = True
                         break
         else:
-            # Validar en la pestaña de Votos de Eliminatorias
             for v in votos_totales:
-                if str(v.get('Nombre', '')).strip().lower() == nombre_usuario_limpio and int(v.get('Fase', 0)) == fase_actual:
+                # Conversión segura para evitar caídas si la celda de Fase viene vacía
+                try:
+                    fase_voto = int(v.get('Fase', 0))
+                except:
+                    fase_voto = 0
+                
+                if str(v.get('Nombre', '')).strip().lower() == nombre_usuario_limpio and fase_voto == fase_actual:
                     ya_voto_en_esta_fase = True
                     break
 
@@ -256,7 +266,11 @@ with pestana_registro:
                 if st.button("🚀 Enviar mi Quiniela Oficial"):
                     try:
                         sh = conectar_google_sheets()
-                        ws_registro = sh.get_worksheet(0)
+                        # Busca por nombre explícito primero
+                        try:
+                            ws_registro = sh.worksheet("Participantes")
+                        except:
+                            ws_registro = sh.get_worksheet(0)
                         equipos_texto = ", ".join(sorted(equipos_seleccionados))
                         ws_registro.append_row([nombre_usuario.strip(), equipos_texto])
                         st.cache_data.clear()
@@ -342,6 +356,7 @@ with pestana_leaderboard:
             for fila in filas_usuarios:
                 if len(fila) < 2: continue
                 nombre = fila[0].strip()
+                if not nombre: continue
                 lista_equipos_usuario = set([limpiar_texto_equipo(e) for e in fila[1].split(",")])
                 
                 aciertos_f1 = len(lista_equipos_usuario & resultados_oficiales_f1)
@@ -359,9 +374,9 @@ with pestana_leaderboard:
             }
             
             for v in votos_totales:
-                u_nombre = v['Nombre'].strip()
-                p_id = v['Partido_ID']
-                u_voto = limpiar_texto_equipo(v['Voto_Usuario'])
+                u_nombre = v.get('Nombre', '').strip()
+                p_id = v.get('Partido_ID', '')
+                u_voto = limpiar_texto_equipo(v.get('Voto_Usuario', ''))
                 
                 if u_nombre in puntuacion_global and p_id in dict_ganadores_reales:
                     if u_voto == dict_ganadores_reales[p_id]:
@@ -380,4 +395,4 @@ with pestana_leaderboard:
             st.info("No hay datos de participación guardados.")
 
     except Exception as e:
-        st.error("No se pudo compilar la tabla acumulada.")
+        st.error(f"No se pudo compilar la tabla acumulada. Detalles: {e}")
